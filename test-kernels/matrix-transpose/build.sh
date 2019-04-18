@@ -29,11 +29,12 @@ $LLVM_BIN_DIR/llvm-dis ./device.bc
 # Assemble hostcode
 $LLVM_BIN_DIR/llc -O0 -debugger-tune=gdb -filetype=obj -o hostcode.o host.bc
 
-# Optimize the device code
-#$LLVM_BIN_DIR/opt -disable-output                                             \
-##                  -load-pass-plugin=$LLVM_BUILD_DIR/lib/LLVMCUDACoarsening.so \
-#                  -passes="cuda-coarsening"                                   \
-#                  matrix-transpose-cuda-nvptx64-nvidia-cuda-sm_61.bc
+# Optimize the device code using our pass
+$LLVM_BIN_DIR/opt -load $LLVM_BUILD_DIR/lib/LLVMCUDACoarsening.so             \
+                  -cuda-coarsening-pass                                       \
+                  device.bc -o device_coarsened.bc
+
+$LLVM_BIN_DIR/llvm-dis ./device_coarsened.bc
 
 # Produce PTX
 $LLVM_BIN_DIR/llc -mcpu=$DEVICE_ARCH -o kernel.$DEVICE_ARCH.ptx device.bc
@@ -56,10 +57,10 @@ $LLVM_BIN_DIR/clang-8 -cc1 -triple x86_64-unknown-linux-gnu                   \
                       -mdisable-fp-elim -fmath-errno -masm-verbose            \
                       -mconstructor-aliases -munwind-tables -fuse-init-array  \
                       -target-cpu x86-64 -dwarf-column-info                   \
-                      -debugger-tuning=gdb -v                                 \
+                      -debugger-tuning=gdb                                    \
                       -resource-dir /DATA/LLVM/build_debug/lib/clang/8.0.1    \
-                      -internal-isystem /DATA/LLVM/build_debug/lib/clang/8.0.1/include/cuda_wrappers -internal-isystem /opt/cuda-9.2/include -include __clang_cuda_runtime_wrapper.h -I/opt/intel/composerxe/linux/ipp/include -I/opt/intel/composerxe/linux/mkl/include -ISUBSTITUTE_INSTALL_DIR_HERE/include -I/opt/intel/composerxe/linux/tbb/include -internal-isystem /usr/lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1 -internal-isystem /usr/lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1/x86_64-pc-linux-gnu -internal-isystem /usr/lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1/backward -internal-isystem /usr/lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1 -internal-isystem /usr/lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1/x86_64-pc-linux-gnu -internal-isystem /usr/lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1/backward -internal-isystem /usr/local/include -internal-isystem /DATA/LLVM/build_debug/lib/clang/8.0.1/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -internal-isystem /usr/local/include -internal-isystem /DATA/LLVM/build_debug/lib/clang/8.0.1/include -internal-externc-isystem /include -internal-externc-isystem /usr/include
-                     -fdeprecated-macro -fdebug-compilation-dir /home/richard/CUDACoarsening/cuda-coarsening/test-kernels/matrix-transpose -ferror-limit 19 -fmessage-length 0 -fobjc-runtime=gcc -fcxx-exceptions -fexceptions -fdiagnostics-show-option -o combined.o -x cuda ./matrix-transpose.cu -fcuda-include-gpubinary device.fatbin -faddrsig
+                      -internal-isystem /DATA/LLVM/build_debug/lib/clang/8.0.1/include/cuda_wrappers -internal-isystem /opt/cuda-9.2/include -include __clang_cuda_runtime_wrapper.h -I/opt/intel/composerxe/linux/ipp/include -I/opt/intel/composerxe/linux/mkl/include -ISUBSTITUTE_INSTALL_DIR_HERE/include -I/opt/intel/composerxe/linux/tbb/include -internal-isystem /usr/lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1 -internal-isystem /usr/lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1/x86_64-pc-linux-gnu -internal-isystem /usr/lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1/backward -internal-isystem /usr/lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1 -internal-isystem /usr/lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1/x86_64-pc-linux-gnu -internal-isystem /usr/lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1/backward -internal-isystem /usr/local/include -internal-isystem /DATA/LLVM/build_debug/lib/clang/8.0.1/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -internal-isystem /usr/local/include -internal-isystem /DATA/LLVM/build_debug/lib/clang/8.0.1/include -internal-externc-isystem /include -internal-externc-isystem /usr/include \
+                      -fdeprecated-macro -fdebug-compilation-dir /home/richard/CUDACoarsening/cuda-coarsening/test-kernels/matrix-transpose -ferror-limit 19 -fmessage-length 0 -fobjc-runtime=gcc -fcxx-exceptions -fexceptions -fdiagnostics-show-option -o combined.o -x cuda ./matrix-transpose.cu -fcuda-include-gpubinary device.fatbin -faddrsig
 
 # Link
 $LLVM_BIN_DIR/clang -L/opt/cuda-9.2/lib64 -lcudart -o matrix-transpose combined.o

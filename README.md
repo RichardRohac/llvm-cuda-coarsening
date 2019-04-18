@@ -1,1 +1,1 @@
-# llvm-cuda-coarsening
+#cuda-coarsening
