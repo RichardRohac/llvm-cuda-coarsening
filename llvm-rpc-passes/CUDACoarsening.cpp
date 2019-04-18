@@ -18,8 +18,12 @@
 
 //#include "ThreadLevel.h"
 
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Instruction.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/CallSite.h"
 
 #include "CUDACoarsening.h"
 #include "Util.h"
@@ -42,27 +46,92 @@ bool CUDACoarseningPass::runOnModule(Module& M)
     errs() << "\nInvoked CUDA COARSENING PASS (MODULE LEVEL) ";
     errs() << "on module: " << M.getName() << "\n";
 
-    const llvm::NamedMDNode *kernels = M.getNamedMetadata("nvvm.annotations");
-    if (!kernels) {
-        errs() << "--! STOP !-- No CUDA kernels in this module.\n";
+    bool result = false;
+
+    if (M.getTargetTriple() == CUDA_TARGET_TRIPLE) {
+        // -----------------------------------------------------------------
+        // Device code gets extended with coarsened versions of the kernels
+        // For example:
+        // -----------------------------------------------------------------
+        // kernelXYZ -> kernelXYZ_1x_2x kernelXYZ_1x_4x kernelXYZ_1x_8x ...
+        //              kernelXYZ_2x_1x
+        //              kernelXYZ_4x_1x
+        //              kernelXYZ_8x_1x
+        //              ...
+        // -----------------------------------------------------------------
+        // Where the numbering in the kernel names is defined as follows:
+        // <block_level_coarsening_factor>_<thread_level_coarsening_factor>
+        // -----------------------------------------------------------------
+        result = handleDeviceCode(M);
+    }
+    else {
+        // -----------------------------------------------------------------
+        // Host code gets either extended with a dispatcher function
+        // to support more versions of coarsened grids, or, for optimization
+        // purposes, specific one can be selected as well.
+        // -----------------------------------------------------------------
+        result = handleHostCode(M);
+    }
+    errs() << "End of CUDA coarsening pass!" << "\n\n";
+
+    return result;
+}
+
+void CUDACoarseningPass::getAnalysisUsage(AnalysisUsage& Info) const
+{
+}
+
+bool CUDACoarseningPass::handleDeviceCode(Module& M)
+{
+    errs() << "--  INFO  -- Running on device code" << "\n";
+
+    const llvm::NamedMDNode *nvmmAnnot = M.getNamedMetadata("nvvm.annotations");
+    if (!nvmmAnnot) {
+        errs() << "--  STOP  -- Missing nvvm.annotations in this module.\n";
         return false;
     }
 
+    bool foundKernel = false;
     for (auto& F : M) {
         if (Util::isKernelFunction(F)) {
-            errs() << "Found CUDA kernel: " << F.getName() << "\n";
+            foundKernel = true;
+            errs() << "--  INFO  -- Found CUDA kernel: " << F.getName() << "\n";
         }
 
         // ThreadLevel *threadLevel = &getAnalysis<ThreadLevel>(F);
     }
 
-    errs() << std::endl;
-
-    return true;
+    return foundKernel;
 }
 
-void CUDACoarseningPass::getAnalysisUsage(AnalysisUsage& Info) const
+bool CUDACoarseningPass::handleHostCode(Module& M)
 {
+    errs() << "--  INFO  -- Running on host code" << "\n";
+
+    bool foundGrid = false;
+
+    // In case of the host code, look for "cudaLaunch" invocations
+    for (Function& F : M) {
+        // Function consists of basic blocks, which in turn consist of
+        // instructions.
+        for (BasicBlock& B : F) {
+            for (Instruction& I : B) {
+                Instruction *pI = &I;
+                if (CallInst *callInst = dyn_cast<CallInst>(pI)) {
+                    Function *calledF = callInst->getCalledFunction();
+
+                    if (calledF->getName() == CUDA_RUNTIME_LAUNCH) {
+                        foundGrid = true;
+                        errs() << callInst->getCalledFunction()->getName();
+                        callInst->print(errs());
+                        errs() << "\n";                        
+                    }
+                }
+            }
+        }
+    }
+
+    return foundGrid;
 }
 
 } // end anonymous namespace
@@ -74,7 +143,7 @@ static RegisterPass<CUDACoarseningPass> X("cuda-coarsening-pass",
                                           );
 
 
-}
+//}
 /*
 struct CUDACoarsening : public ModulePass {
     static char ID;

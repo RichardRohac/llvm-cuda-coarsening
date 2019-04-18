@@ -25,6 +25,11 @@ class CUDACoarseningPass : public ModulePass {
 
     // DATA
     static char ID;
+
+  private:
+    // MODIFIERS
+    bool handleDeviceCode(Module& M);
+    bool handleHostCode(Module& M);
 };
 
 } // end anonymous namespace
