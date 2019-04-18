@@ -2,6 +2,8 @@
 // Copyright (c) Richard Rohac, 2019, All rights reserved.
 // ============================================================================
 // CUDA Coarsening Transformation pass
+// -> Based on Alberto's Magni OpenCL coarsening pass algorithm
+//    available at https://github.com/HariSeldon/coarsening_pass
 // ============================================================================
 
 /* #include "llvm/ADT/Statistic.h"
@@ -24,6 +26,9 @@
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/CallSite.h"
+
+#include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/PostDominators.h"
 
 #include "CUDACoarsening.h"
 #include "Util.h"
@@ -79,6 +84,9 @@ bool CUDACoarseningPass::runOnModule(Module& M)
 
 void CUDACoarseningPass::getAnalysisUsage(AnalysisUsage& Info) const
 {
+    Info.addRequired<LoopInfoWrapperPass>();
+    Info.addRequired<PostDominatorTreeWrapperPass>();
+    Info.addRequired<DominatorTreeWrapperPass>();
 }
 
 bool CUDACoarseningPass::handleDeviceCode(Module& M)
@@ -93,9 +101,11 @@ bool CUDACoarseningPass::handleDeviceCode(Module& M)
 
     bool foundKernel = false;
     for (auto& F : M) {
-        if (Util::isKernelFunction(F)) {
+        if (Util::isKernelFunction(F) && !F.isDeclaration()) {
             foundKernel = true;
             errs() << "--  INFO  -- Found CUDA kernel: " << F.getName() << "\n";
+
+            analyzeKernel(F);
         }
 
         // ThreadLevel *threadLevel = &getAnalysis<ThreadLevel>(F);
@@ -132,6 +142,14 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
     }
 
     return foundGrid;
+}
+
+void CUDACoarseningPass::analyzeKernel(Function& F)
+{
+    // Perform initial analysis.
+    m_loopInfo = &getAnalysis<LoopInfoWrapperPass>(F).getLoopInfo();
+    m_postDomT = &getAnalysis<PostDominatorTreeWrapperPass>(F).getPostDomTree();
+    m_domT = &getAnalysis<DominatorTreeWrapperPass>(F).getDomTree();
 }
 
 } // end anonymous namespace

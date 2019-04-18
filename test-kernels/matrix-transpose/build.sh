@@ -29,11 +29,18 @@ $LLVM_BIN_DIR/llvm-dis ./device.bc
 # Assemble hostcode
 $LLVM_BIN_DIR/llc -O0 -debugger-tune=gdb -filetype=obj -o hostcode.o host.bc
 
+# Modify host kernel launch routines
+$LLVM_BIN_DIR/opt -load $LLVM_BUILD_DIR/lib/LLVMCUDACoarsening.so             \
+                  -cuda-coarsening-pass                                       \
+                  host.bc -o host_coarsened.bc
+
 # Optimize the device code using our pass
 $LLVM_BIN_DIR/opt -load $LLVM_BUILD_DIR/lib/LLVMCUDACoarsening.so             \
                   -cuda-coarsening-pass                                       \
                   device.bc -o device_coarsened.bc
 
+# Generate readable versions
+$LLVM_BIN_DIR/llvm-dis ./host_coarsened.bc
 $LLVM_BIN_DIR/llvm-dis ./device_coarsened.bc
 
 # Produce PTX

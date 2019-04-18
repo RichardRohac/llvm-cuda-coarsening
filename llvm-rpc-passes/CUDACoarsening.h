@@ -12,6 +12,12 @@
 
 using namespace llvm;
 
+namespace llvm {
+    class LoopInfo;
+    class PostDominatorTree;
+    class DominatorTree;
+}
+
 namespace {
 
 class CUDACoarseningPass : public ModulePass {
@@ -30,6 +36,13 @@ class CUDACoarseningPass : public ModulePass {
     // MODIFIERS
     bool handleDeviceCode(Module& M);
     bool handleHostCode(Module& M);
+    
+    void analyzeKernel(Function& F);
+
+    // DATA
+    LoopInfo          *m_loopInfo;
+    PostDominatorTree *m_postDomT;
+    DominatorTree     *m_domT;
 };
 
 } // end anonymous namespace

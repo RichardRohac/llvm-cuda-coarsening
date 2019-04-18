@@ -13,7 +13,6 @@ endif()
 add_llvm_library( LLVMCUDACoarsening MODULE BUILDTREE_ONLY
   CUDACoarsening.cpp
   Util.cpp
-  ThreadLevel.cpp
   DivergenceInfo.cpp
   Grid.cpp
   Common.cpp
