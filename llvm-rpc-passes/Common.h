@@ -1,6 +1,20 @@
-/* #ifndef LLVM_LIB_TRANSFORMS_CUDA_COARSENING_COMMON_H
+#ifndef LLVM_LIB_TRANSFORMS_CUDA_COARSENING_COMMON_H
 #define LLVM_LIB_TRANSFORMS_CUDA_COARSENING_COMMON_H
 
+#include <vector>
+#include <set>
+
+namespace llvm {
+    class Instruction;
+}
+
+// ===========================================================================
+// DATA TYPES
+// ===========================================================================
+typedef std::vector<llvm::Instruction *> InstVector;
+typedef std::set<llvm::Instruction *> InstSet;
+
+/*
 BasicBlock *findImmediatePostDom(BasicBlock *block,
                                  const PostDominatorTree *pdt);
 
@@ -19,5 +33,6 @@ template <class T> bool isPresent(const T *value, const std::deque<T *> &deque);
 
 bool isPresent(const Instruction *inst, const BlockVector &value);
 bool isPresent(const Instruction *inst, std::vector<BlockVector *> &value);
+*/
 
-#endif */
+#endif 

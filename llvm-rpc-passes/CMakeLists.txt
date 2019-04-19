@@ -13,8 +13,8 @@ endif()
 add_llvm_library( LLVMCUDACoarsening MODULE BUILDTREE_ONLY
   CUDACoarsening.cpp
   Util.cpp
-  DivergenceInfo.cpp
-  Grid.cpp
+  DivergenceAnalysisPass.cpp
+  GridAnalysisPass.cpp
   Common.cpp
 
   DEPENDS

@@ -1,14 +1,14 @@
+// ============================================================================
+// Copyright (c) Richard Rohac, 2019, All rights reserved.
+// ============================================================================
+// CUDA Coarsening Transformation pass
+// -> Based on Alberto's Magni OpenCL coarsening pass algorithm
+//    available at https://github.com/HariSeldon/coarsening_pass
+// ============================================================================
+
+
 #ifndef LLVM_LIB_TRANSFORMS_CUDA_COARSENING_H
 #define LLVM_LIB_TRANSFORMS_CUDA_COARSENING_H
-
-//#include <vector>
-//#include <set>
-
-//#include "llvm/IR/InstrTypes.h"
-//#include "llvm/IR/Instructions.h"
-
-//typedef std::vector<llvm::Instruction *> InstVector;
-//typedef std::set<llvm::Instruction *> InstSet;
 
 using namespace llvm;
 
@@ -18,7 +18,7 @@ namespace llvm {
     class DominatorTree;
 }
 
-namespace {
+class DivergenceAnalysisPass;
 
 class CUDACoarseningPass : public ModulePass {
   public:
@@ -27,7 +27,7 @@ class CUDACoarseningPass : public ModulePass {
 
     // ACCESSORS
     bool runOnModule(Module& M) override;
-    void getAnalysisUsage(AnalysisUsage& Info) const override;
+    void getAnalysisUsage(AnalysisUsage& AU) const override;
 
     // DATA
     static char ID;
@@ -40,11 +40,10 @@ class CUDACoarseningPass : public ModulePass {
     void analyzeKernel(Function& F);
 
     // DATA
-    LoopInfo          *m_loopInfo;
-    PostDominatorTree *m_postDomT;
-    DominatorTree     *m_domT;
+    LoopInfo               *m_loopInfo;
+    PostDominatorTree      *m_postDomT;
+    DominatorTree          *m_domT;
+    DivergenceAnalysisPass *m_divergenceAnalysis;
 };
-
-} // end anonymous namespace
 
 #endif
