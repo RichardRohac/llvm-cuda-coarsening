@@ -1,8 +1,10 @@
 #ifndef LLVM_LIB_TRANSFORMS_CUDA_COARSENING_COMMON_H
 #define LLVM_LIB_TRANSFORMS_CUDA_COARSENING_COMMON_H
 
+#include <string>
 #include <vector>
 #include <set>
+#include <unordered_map>
 
 namespace llvm {
     class Instruction;

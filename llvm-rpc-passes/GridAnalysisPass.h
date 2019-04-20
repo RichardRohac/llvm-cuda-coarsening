@@ -9,6 +9,13 @@
 
 using namespace llvm;
 
+#define CUDA_THREAD_ID_VAR  "threadIdx"
+#define CUDA_BLOCK_ID_VAR   "blockIdx"
+#define CUDA_BLOCK_DIM_VAR  "blockDim"
+#define CUDA_GRID_DIM_VAR   "gridDim"
+
+#define CUDA_MAX_DIM        3
+
 namespace llvm {
 }
 
@@ -28,10 +35,14 @@ public:
     static char ID;
 
 private:
-    void clear();
-    void analyse();
+    // PRIVATE TYPES
+    typedef std::unordered_map<std::string, InstVector> varInstructions_t;
+
+    // PRIVATE MANIPULATORS
+    void init();
 
     // DATA
+    std::vector<varInstructions_t> gridInstructions; 
 };
 
 #endif
