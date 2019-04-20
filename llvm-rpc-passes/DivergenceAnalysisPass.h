@@ -18,6 +18,7 @@ namespace llvm {
 }
 
 class GridAnalysisPass;
+class DivergentRegion;
 
 class DivergenceAnalysisPass : public FunctionPass {
 public:
@@ -32,11 +33,16 @@ public:
     static char ID;
 
 private:
+    // PRIVATE MANIPULATORS
     void clear();
     void analyse();
+    void findDivergentBranches();
+    void findRegions();
 
     // DATA
     InstVector         m_divergent;
+    InstVector         m_divergentBranches;
+    RegionVector       m_regions;
 
     LoopInfo          *m_loopInfo;
     PostDominatorTree *m_postDomT;

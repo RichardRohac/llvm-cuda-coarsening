@@ -3,6 +3,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/Analysis/PostDominators.h"
 #include "llvm/Support/MutexGuard.h"
 
@@ -81,6 +82,153 @@ void Util::findUsesOf(Instruction *inst, InstSet &result) {
 BasicBlock *Util::findImmediatePostDom(BasicBlock              *block,
                                        const PostDominatorTree *pdt) {
     return pdt->getNode(block)->getIDom()->getBlock();
+}
+
+// Domination ----------------------------------------------------------------
+bool Util::isDominated(const Instruction   *inst,
+                       BranchVector&        branches,
+                       const DominatorTree *dt)
+{
+    const BasicBlock *block = inst->getParent();
+    return std::any_of(branches.begin(), branches.end(),
+                        [inst, block, dt](BranchInst *branch) {
+        const BasicBlock *currentBlock = branch->getParent();
+        return inst != branch && dt->dominates(currentBlock, block);
+    });
+}
+
+bool Util::isDominated(const Instruction   *inst,
+                       BranchSet&           branches,
+                       const DominatorTree *dt) 
+{
+    const BasicBlock *block = inst->getParent();
+    return std::any_of(branches.begin(), branches.end(),
+                        [inst, block, dt](BranchInst *branch) {
+        const BasicBlock *currentBlock = branch->getParent();
+        return inst != branch && dt->dominates(currentBlock, block);
+    });
+}
+
+bool Util::isDominated(const BasicBlock    *block,
+                       const BlockVector&   blocks,
+                       const DominatorTree *dt)
+{
+    return std::any_of(blocks.begin(), blocks.end(),
+                        [block, dt](BasicBlock *iter) {
+        return block != iter && dt->dominates(iter, block);
+    });
+}
+
+bool Util::dominatesAll(const BasicBlock    *block,
+                        const BlockVector&   blocks,
+                        const DominatorTree *dt)
+{
+    return std::all_of(
+        blocks.begin(), blocks.end(),
+        [block, dt](BasicBlock *iter) { return dt->dominates(block, iter); });
+}
+
+bool Util::postdominatesAll(const BasicBlock        *block,
+                            const BlockVector&       blocks,
+                            const PostDominatorTree *pdt) {
+    return std::all_of(
+        blocks.begin(), blocks.end(),
+        [block, pdt](BasicBlock *iter) { return pdt->dominates(block, iter); });
+}
+
+// Cloning support ------------------------------------------------------------
+// This is black magic. Don't touch it.
+void Util::cloneDominatorInfo(BasicBlock *BB, Map &map, DominatorTree *DT)
+{
+    assert(DT && "DominatorTree is not available");
+    Map::iterator BI = map.find(BB);
+    assert(BI != map.end() && "BasicBlock clone is missing");
+    BasicBlock *NewBB = cast<BasicBlock>(BI->second);
+
+    // NewBB already got dominator info.
+    if (DT->getNode(NewBB))
+        return;
+
+    assert(DT->getNode(BB) && "BasicBlock does not have dominator info");
+    // Entry block is not expected here. Infinite loops are not to cloned.
+    assert(DT->getNode(BB)->getIDom() &&
+            "BasicBlock does not have immediate dominator");
+    BasicBlock *BBDom = DT->getNode(BB)->getIDom()->getBlock();
+
+    // NewBB's dominator is either BB's dominator or BB's dominator's clone.
+    BasicBlock *NewBBDom = BBDom;
+    Map::iterator BBDomI = map.find(BBDom);
+    if (BBDomI != map.end()) {
+        NewBBDom = cast<BasicBlock>(BBDomI->second);
+        if (!DT->getNode(NewBBDom))
+        cloneDominatorInfo(BBDom, map, DT);
+    }
+    DT->addNewBlock(NewBB, NewBBDom);
+}
+
+// Map management ---------------------------------------------------------
+/*void Util::applyMap(Instruction *Inst, CoarseningMap &map, unsigned int CF) {
+  for (unsigned op = 0, opE = Inst->getNumOperands(); op != opE; ++op) {
+    Instruction *Op = dyn_cast<Instruction>(Inst->getOperand(op));
+    CoarseningMap::iterator It = map.find(Op);
+
+    if (It != map.end()) {
+      InstVector &instVector = It->second;
+      Value *NewValue = instVector.at(CF);
+      Inst->setOperand(op, NewValue);
+    }
+  }
+}*/
+
+void Util::applyMap(Instruction *Inst, Map& map) {
+    for (unsigned op = 0, opE = Inst->getNumOperands(); op != opE; ++op) {
+        Value *Op = Inst->getOperand(op);
+
+        Map::const_iterator It = map.find(Op);
+        if (It != map.end())
+        Inst->setOperand(op, It->second);
+    }
+
+    if (PHINode *Phi = dyn_cast<PHINode>(Inst))
+        Util::applyMapToPhiBlocks(Phi, map);
+}
+
+void Util::applyMap(BasicBlock *block, Map &map) {
+    for (auto iter = block->begin(), end = block->end(); iter != end; ++iter)
+        Util::applyMap(&*iter, map);
+}
+
+void Util::applyMapToPHIs(BasicBlock *block, Map &map) {
+    for (auto phi = block->begin(); isa<PHINode>(phi); ++phi)
+        Util::applyMap(&*phi, map);
+}
+
+void Util::applyMapToPhiBlocks(PHINode *Phi, Map &map) {
+    for (unsigned int index = 0; index < Phi->getNumIncomingValues(); ++index) {
+        BasicBlock *OldBlock = Phi->getIncomingBlock(index);
+        Map::const_iterator It = map.find(OldBlock);
+
+        if (It != map.end()) {
+            // I am not proud of this.
+            BasicBlock *NewBlock =
+                const_cast<BasicBlock *>(cast<BasicBlock>(It->second));
+            Phi->setIncomingBlock(index, NewBlock);
+        }
+    }
+}
+
+void Util::applyMap(InstVector &insts, Map &map, InstVector &result) {
+    result.clear();
+    result.reserve(insts.size());
+
+    for (auto inst : insts) {
+        Value *newValue = map[inst];
+        if (newValue != nullptr) {
+            if (Instruction *newInst = dyn_cast<Instruction>(newValue)) {
+                result.push_back(newInst);
+            }
+        }
+    }
 }
 
 // ============================================================================

@@ -22,7 +22,10 @@ namespace llvm {
     class Function;
     class Instruction;
     class BasicBlock;
+    class DominatorTree;
     class PostDominatorTree;
+    class BranchInst;
+    class PHINode;
 }
 
 class Util {
@@ -34,6 +37,41 @@ class Util {
     static llvm::BasicBlock *findImmediatePostDom(
                                            llvm::BasicBlock              *block,
                                            const llvm::PostDominatorTree *pdt);
+
+    // Domination -------------------------------------------------------------
+    static bool isDominated(const llvm::Instruction   *inst,
+                            BranchSet&                 blocks,
+                            const llvm::DominatorTree *dt);
+
+    static bool isDominated(const llvm::Instruction   *inst,
+                            BranchVector&              blocks,
+                            const llvm::DominatorTree *dt);
+
+    static bool isDominated(const llvm::BasicBlock    *block,
+                            const BlockVector&         blocks,
+                            const llvm::DominatorTree *dt);
+
+    static bool dominatesAll(const llvm::BasicBlock    *block,
+                             const BlockVector&         blocks,
+                             const llvm::DominatorTree *dt);
+
+    static bool postdominatesAll(const llvm::BasicBlock        *block,
+                                 const BlockVector&             blocks,
+                                 const llvm::PostDominatorTree *pdt);
+
+    // Cloning support --------------------------------------------------------
+    static void cloneDominatorInfo(llvm::BasicBlock    *block,
+                                   Map&                 map,
+                                   llvm::DominatorTree *dt);
+
+    // Map management ---------------------------------------------------------
+    static void applyMap(llvm::Instruction *Inst, Map& map);
+    static void applyMap(llvm::BasicBlock *block, Map& map);
+    static void applyMapToPHIs(llvm::BasicBlock *block, Map& map);
+    static void applyMapToPhiBlocks(llvm::PHINode *Phi, Map& map);
+    //void applyMap(llvm::Instruction *Inst, CoarseningMap &map, unsigned int CF);
+    static void applyMap(InstVector& insts, Map& map, InstVector& result);
+
 };
 
 #endif // LLVM_LIB_TRANSFORMS_CUDA_COARSENING_UTIL_H

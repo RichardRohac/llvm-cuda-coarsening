@@ -16,6 +16,8 @@
 #include "Common.h"
 #include "Util.h"
 #include "GridAnalysisPass.h"
+#include "RegionBounds.h"
+#include "DivergentRegion.h"
 #include "DivergenceAnalysisPass.h"
 
 extern cl::opt<int> CLCoarseningDirection;
@@ -55,6 +57,8 @@ bool DivergenceAnalysisPass::runOnFunction(Function& F)
     m_grid = &getAnalysis<GridAnalysisPass>();
 
     analyse();
+    findDivergentBranches();
+    findRegions();
 
     return false;
 }
@@ -63,6 +67,8 @@ bool DivergenceAnalysisPass::runOnFunction(Function& F)
 void DivergenceAnalysisPass::clear()
 {
     m_divergent.clear();
+    m_divergentBranches.clear();
+    m_regions.clear();
 }
 
 void DivergenceAnalysisPass::analyse()
@@ -85,7 +91,7 @@ void DivergenceAnalysisPass::analyse()
             BasicBlock *block = Util::findImmediatePostDom(inst->getParent(),
                                                            m_postDomT);
             for (auto it = block->begin(); isa<PHINode>(it); ++it) {
-                users.insert(&(*it));
+                users.insert(&*it);
             }
         }
 
@@ -98,6 +104,32 @@ void DivergenceAnalysisPass::analyse()
                 worklist.insert(*iter);
             }
         }
+    }
+}
+
+void DivergenceAnalysisPass::findDivergentBranches()
+{
+    std::copy_if(m_divergent.begin(),
+                 m_divergent.end(),
+                 std::back_inserter(m_divergentBranches),
+                 [](Instruction *pI) {
+                        return isa<BranchInst>(pI);
+                 });
+}
+
+void DivergenceAnalysisPass::findRegions()
+{
+    for (Instruction *divBranch : m_divergentBranches) {
+        BasicBlock *header = divBranch->getParent();
+        BasicBlock *exiting = Util::findImmediatePostDom(header, m_postDomT);
+
+        if (m_loopInfo->isLoopHeader(header)) {
+            Loop *loop = m_loopInfo->getLoopFor(header);
+            if (loop == m_loopInfo->getLoopFor(exiting))
+                exiting = loop->getExitBlock();
+        }
+
+        m_regions.push_back(new DivergentRegion(header, exiting));
     }
 }
 

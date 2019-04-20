@@ -6,24 +6,43 @@
 #include <set>
 #include <unordered_map>
 #include <deque>
+#include <numeric>
+#include <functional>
+#include <algorithm>
+
+#include "llvm/IR/ValueMap.h"
+#include "llvm/Transforms/Utils/ValueMapper.h"
 
 namespace llvm {
     class Instruction;
     class Value;
     class BasicBlock;
+    class BranchInst;
+    class WeakTrackingVH;
 }
+
+class DivergentRegion;
 
 // ===========================================================================
 // DATA TYPES
 // ===========================================================================
+typedef llvm::ValueMap<const llvm::Value *, llvm::WeakTrackingVH> Map;
+
 typedef std::vector<llvm::Instruction *> InstVector;
 typedef std::vector<const llvm::Instruction *> ConstInstVector;
 typedef std::set<llvm::Instruction *> InstSet;
 typedef std::set<const llvm::Instruction *> ConstInstSet;
+
 typedef std::vector<llvm::BasicBlock *> BlockVector;
 typedef std::deque<llvm::BasicBlock *> BlockDeque;
+
 typedef std::vector<llvm::Value *> ValueVector;
 typedef std::vector<const llvm::Value *> ConstValueVector;
+
+typedef std::vector<llvm::BranchInst *> BranchVector;
+typedef std::set<llvm::BranchInst *> BranchSet;
+
+typedef std::vector<DivergentRegion *> RegionVector;
 
 // ===========================================================================
 // HELPER FUNCTIONS

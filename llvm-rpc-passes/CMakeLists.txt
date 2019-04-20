@@ -16,6 +16,8 @@ add_llvm_library( LLVMCUDACoarsening MODULE BUILDTREE_ONLY
   DivergenceAnalysisPass.cpp
   GridAnalysisPass.cpp
   Common.cpp
+  RegionBounds.cpp
+  DivergentRegion.cpp
 
   DEPENDS
   intrinsics_gen
