@@ -7,12 +7,14 @@
 // ============================================================================
 
 #include "llvm/Pass.h"
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
 
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/PostDominators.h"
 
 #include "Common.h"
+#include "Util.h"
 #include "GridAnalysisPass.h"
 #include "DivergenceAnalysisPass.h"
 
@@ -79,21 +81,23 @@ void DivergenceAnalysisPass::analyse()
         InstSet users;
 
         // Manage branches.
-        //if (isa<BranchInst>(inst)) {
-        //    BasicBlock *block = findImmediatePostDom(inst->getParent(), m_postDomTree);
-        //    for (auto inst = block->begin(); isa<PHINode>(inst); ++inst) {
-        //        users.insert(inst);
-        //    }
-        //}
+        if (isa<BranchInst>(inst)) {
+            BasicBlock *block = Util::findImmediatePostDom(inst->getParent(),
+                                                           m_postDomT);
+            for (auto it = block->begin(); isa<PHINode>(it); ++it) {
+                users.insert(&(*it));
+            }
+        }
 
-        //findUsesOf(inst, users);
+        Util::findUsesOf(inst, users);
         // Add users of the current instruction to the work list.
-        //for (InstSet::iterator iter = users.begin(), iterEnd = users.end();
-        //    iter != iterEnd; ++iter) {
-        //    if (!isPresent(*iter, m_divergent)) {
-        //        worklist.insert(*iter);
-        //    }
-        //}
+        for (InstSet::iterator iter = users.begin();
+             iter != users.end();
+             ++iter) {
+             if (!isPresent(*iter, m_divergent)) {
+                worklist.insert(*iter);
+            }
+        }
     }
 }
 

@@ -20,6 +20,9 @@
 
 namespace llvm {
     class Function;
+    class Instruction;
+    class BasicBlock;
+    class PostDominatorTree;
 }
 
 class Util {
@@ -27,6 +30,10 @@ class Util {
     static bool isKernelFunction(llvm::Function& F);
     static std::string directionToString(int direction);
     static std::string cudaVarToRegister(std::string var);
+    static void findUsesOf(llvm::Instruction *inst, InstSet &result);
+    static llvm::BasicBlock *findImmediatePostDom(
+                                           llvm::BasicBlock              *block,
+                                           const llvm::PostDominatorTree *pdt);
 };
 
 #endif // LLVM_LIB_TRANSFORMS_CUDA_COARSENING_UTIL_H

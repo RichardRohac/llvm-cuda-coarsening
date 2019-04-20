@@ -3,6 +3,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/Analysis/PostDominators.h"
 #include "llvm/Support/MutexGuard.h"
 
 using namespace llvm;
@@ -65,6 +66,21 @@ std::string Util::cudaVarToRegister(std::string var)
     else {
         assert(0 && "cudaVarToRegister(): Unknown CUDA variable");
     }
+}
+
+void Util::findUsesOf(Instruction *inst, InstSet &result) {
+    for (auto userIter = inst->user_begin();
+         userIter != inst->user_end();
+         ++userIter) {
+        if (Instruction *userInst = dyn_cast<Instruction>(*userIter)) {
+            result.insert(userInst);
+        }
+    }
+}
+
+BasicBlock *Util::findImmediatePostDom(BasicBlock              *block,
+                                       const PostDominatorTree *pdt) {
+    return pdt->getNode(block)->getIDom()->getBlock();
 }
 
 // ============================================================================
