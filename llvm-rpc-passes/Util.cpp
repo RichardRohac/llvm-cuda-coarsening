@@ -1,3 +1,4 @@
+#include "Common.h"
 #include "Util.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Function.h"
@@ -21,6 +22,49 @@ bool Util::isKernelFunction(llvm::Function& F)
     }
 
     return (x == 1);
+}
+
+std::string Util::directionToString(int direction)
+{
+    assert(direction >= 0 &&
+           direction <= 2 &&
+           "directionToString(): Direction out of bounds!");
+
+    std::string strDirection;
+    switch (direction) {
+        case 0:
+            strDirection = "x";
+            break;
+        
+        case 1:
+            strDirection = "y";
+            break;
+
+        case 2:
+            strDirection = "z";
+            break;
+    }
+
+    return strDirection;
+}
+
+std::string Util::cudaVarToRegister(std::string var)
+{
+    if (var == CUDA_THREAD_ID_VAR) {
+        return CUDA_THREAD_ID_REG;
+    }
+    else if (var == CUDA_BLOCK_ID_VAR) {
+        return CUDA_BLOCK_ID_REG;
+    }
+    else if (var == CUDA_BLOCK_DIM_VAR) {
+        return CUDA_BLOCK_DIM_REG;
+    }
+    else if (var == CUDA_GRID_DIM_VAR) {
+        return CUDA_GRID_DIM_REG;
+    }
+    else {
+        assert(0 && "cudaVarToRegister(): Unknown CUDA variable");
+    }
 }
 
 // ============================================================================

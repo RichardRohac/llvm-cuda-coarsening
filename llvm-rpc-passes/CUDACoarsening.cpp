@@ -23,6 +23,12 @@
 #include "Util.h"
 #include "DivergenceAnalysisPass.h"
 
+// Command line parameters
+cl::opt<int> CLCoarseningDirection("coarsening-direction",
+                                   cl::init(0),
+                                   cl::Hidden,
+                                   cl::desc("Coarsening Direction"));
+
 using namespace llvm;
 
 char CUDACoarseningPass::ID = 0;

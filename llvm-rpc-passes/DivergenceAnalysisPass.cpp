@@ -16,6 +16,8 @@
 #include "GridAnalysisPass.h"
 #include "DivergenceAnalysisPass.h"
 
+extern cl::opt<int> CLCoarseningDirection;
+
 using namespace llvm;
 
 // DATA
@@ -63,7 +65,9 @@ void DivergenceAnalysisPass::clear()
 
 void DivergenceAnalysisPass::analyse()
 {
-    InstVector seeds = m_grid->getGridDependentInstructions(0);
+    InstVector seeds =
+        m_grid->getGridIDDependentInstructions(CLCoarseningDirection);
+
     InstSet worklist(seeds.begin(), seeds.end());
 
     while (!worklist.empty()) {

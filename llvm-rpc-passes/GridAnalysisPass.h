@@ -9,13 +9,6 @@
 
 using namespace llvm;
 
-#define CUDA_THREAD_ID_VAR  "threadIdx"
-#define CUDA_BLOCK_ID_VAR   "blockIdx"
-#define CUDA_BLOCK_DIM_VAR  "blockDim"
-#define CUDA_GRID_DIM_VAR   "gridDim"
-
-#define CUDA_MAX_DIM        3
-
 namespace llvm {
 }
 
@@ -25,7 +18,7 @@ public:
     GridAnalysisPass();
 
     // ACCESSORS
-    InstVector getGridDependentInstructions(int direction) const;
+    InstVector getGridIDDependentInstructions(int direction) const;
 
     // MANIPULATORS
     void getAnalysisUsage(AnalysisUsage& AU) const override;
@@ -40,6 +33,12 @@ private:
 
     // PRIVATE MANIPULATORS
     void init();
+    void analyse(Function *pF);
+    void findInstructionsByName(std::string name, Function *pF);
+    void findInstructionsByName(std::string  name,
+                                Function    *pF,
+                                int          direction,
+                                InstVector  *out);
 
     // DATA
     std::vector<varInstructions_t> gridInstructions; 
