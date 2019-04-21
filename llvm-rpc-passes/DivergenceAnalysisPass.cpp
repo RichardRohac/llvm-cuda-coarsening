@@ -20,7 +20,7 @@
 #include "DivergentRegion.h"
 #include "DivergenceAnalysisPass.h"
 
-extern cl::opt<int> CLCoarseningDirection;
+extern cl::opt<std::string> CLCoarseningDimension;
 
 using namespace llvm;
 
@@ -73,8 +73,14 @@ void DivergenceAnalysisPass::clear()
 
 void DivergenceAnalysisPass::analyse()
 {
+    // HACKZ HACKZ HACKZ
+    assert(CLCoarseningDimension.length() == 1);
+    std::unordered_map<char, int> tmp;
+    tmp['x'] = 0;
+    tmp['y'] = 1;
+    tmp['z'] = 2;
     InstVector seeds =
-        m_grid->getGridIDDependentInstructions(CLCoarseningDirection);
+        m_grid->getGridIDDependentInstructions(tmp[CLCoarseningDimension[0]]);
 
     InstSet worklist(seeds.begin(), seeds.end());
 

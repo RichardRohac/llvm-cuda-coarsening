@@ -1,8 +1,9 @@
 #ifndef LLVM_LIB_TRANSFORMS_CUDA_COARSENING_UTIL_H
 #define LLVM_LIB_TRANSFORMS_CUDA_COARSENING_UTIL_H
 
-#define CUDA_TARGET_TRIPLE  "nvptx64-nvidia-cuda"
-#define CUDA_RUNTIME_LAUNCH "cudaLaunch"
+#define CUDA_TARGET_TRIPLE         "nvptx64-nvidia-cuda"
+#define CUDA_RUNTIME_CONFIGURECALL "cudaConfigureCall"
+#define CUDA_RUNTIME_LAUNCH        "cudaLaunch"
 
 #define CUDA_THREAD_ID_VAR  "threadIdx"
 #define CUDA_BLOCK_ID_VAR   "blockIdx"

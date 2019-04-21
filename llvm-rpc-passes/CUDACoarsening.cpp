@@ -14,6 +14,7 @@
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/CallSite.h"
+#include "llvm/IR/IRBuilder.h"
 
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/PostDominators.h"
@@ -54,10 +55,15 @@ cl::opt<unsigned int> CLCoarseningStride("coarsening-stride",
                                          cl::Hidden,
                                          cl::desc("Coarsening stride"));
 
-cl::opt<int> CLCoarseningDirection("coarsening-direction",
-                                   cl::init(0),
-                                   cl::Hidden,
-                                   cl::desc("Coarsening direction"));
+cl::opt<std::string> CLCoarseningDimension("coarsening-dimension",
+                                           cl::init("y"),
+                                           cl::Hidden,
+                                           cl::desc("Coarsening dimension"));
+
+cl::opt<std::string> CLCoarseningMode("coarsening-mode",
+                                      cl::init("thread"),
+                                      cl::Hidden,
+                                      cl::desc("Coarsening mode (thread/block)"));
 
 using namespace llvm;
 
@@ -72,6 +78,20 @@ CUDACoarseningPass::CUDACoarseningPass()
 
 bool CUDACoarseningPass::runOnModule(Module& M)
 {
+    // Parse command line configuration
+    m_kernelName = CLKernelName;
+    if (m_kernelName == "") {
+        // As the kernel name was not specified, generate runtime dispatcher
+        // TODO
+    }
+
+    m_blockLevel = CLCoarseningMode == "block";
+    m_factor = CLCoarseningFactor;
+    m_stride = CLCoarseningStride;
+    m_dimX = CLCoarseningDimension.find('x') != std::string::npos;
+    m_dimY = CLCoarseningDimension.find('y') != std::string::npos;
+    m_dimZ = CLCoarseningDimension.find('z') != std::string::npos;
+
     errs() << "\nInvoked CUDA COARSENING PASS (MODULE LEVEL) "
            << "on module: " << M.getName()
            << " -- kernel: " << CLKernelName << " " << CLCoarseningFactor
@@ -147,6 +167,59 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
 
     bool foundGrid = false;
 
+    LLVMContext& ctx = M.getContext();
+    Constant *rpcScaleDim = M.getOrInsertFunction(
+        "rpcScaleDim",
+        Type::getVoidTy(ctx),
+        // *XY, *Z, factor, x, y, z
+        Type::getInt64PtrTy(ctx),
+        Type::getInt32PtrTy(ctx),
+        Type::getInt32Ty(ctx),
+        Type::getInt8Ty(ctx),
+        Type::getInt8Ty(ctx),
+        Type::getInt8Ty(ctx)
+    );
+
+    Function *rpcScaleDimF = cast<Function>(rpcScaleDim);
+    rpcScaleDimF->setCallingConv(CallingConv::C);
+
+    Function::arg_iterator args = rpcScaleDimF->arg_begin();
+    Value *xy = args++;
+    xy->setName("xy");
+    Value *z = args++;
+    z->setName("z");
+    Value *factor = args++;
+    factor->setName("factor");
+    Value *dimX = args++;
+    dimX->setName("dimX");
+    Value *dimY = args++;
+    dimY->setName("dimY");
+    Value *dimZ = args++;
+    dimZ->setName("dimZ");
+
+    BasicBlock* block = BasicBlock::Create(ctx, "entry", rpcScaleDimF);
+    BasicBlock *blockX = BasicBlock::Create(ctx, "blockX", rpcScaleDimF);
+    IRBuilder<> builder(block);
+
+    Value *enableX = builder.CreateICmpEQ(dimX, builder.getInt8(1));
+    BasicBlock *blockXEnd = BasicBlock::Create(ctx, "blockXEnd", rpcScaleDimF);
+    Value *bX = builder.CreateCondBr(enableX, blockX, blockXEnd);
+
+    builder.SetInsertPoint(blockX);
+   // Value *castX = builder.CreateBitCast(xy, Type::getInt32PtrTy(ctx), "x");
+    Value *loadX = builder.CreateLoad(xy, builder.getInt64Ty(), "x_val");
+    Value *factorCast = builder.CreateIntCast(factor, builder.getInt64Ty(), false);
+    Value *divX = builder.CreateUDiv(loadX, factorCast, "scaled_x");
+    //Value *castDivX = builder.CreateIntCast(divX, Type::getInt64Ty(ctx), false, "cast_div_x");
+    Value *savedX = builder.CreateAlignedStore(divX, xy, 4);
+    builder.CreateBr(blockXEnd);
+    
+    builder.SetInsertPoint(blockXEnd);
+    ReturnInst *ret = builder.CreateRetVoid();
+
+    //Value *loadX = builder.CreateLoad(builder.getInt32Ty(), xy, "x");
+    //Value *divX = builder.CreateUDiv()
+
     // In case of the host code, look for "cudaLaunch" invocations
     for (Function& F : M) {
         // Function consists of basic blocks, which in turn consist of
@@ -157,13 +230,42 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
                 if (CallInst *callInst = dyn_cast<CallInst>(pI)) {
                     Function *calledF = callInst->getCalledFunction();
 
-                    if (calledF->getName() == CUDA_RUNTIME_LAUNCH) {
+                    if (calledF->getName() == CUDA_RUNTIME_CONFIGURECALL) {
                         foundGrid = true;
-                       // std::string name = 
-                      //      demangle(callInst->getCalledFunction()->getgetName());
-                     //   errs() << name;
-                     //   callInst->print(errs());
-                      //  errs() << "\n";                        
+
+                        Instruction *resultCheck = callInst->getNextNode();
+                        assert(isa<ICmpInst>(resultCheck) &&
+                               "Result comparison instruction expected!");
+                        Instruction *branchI = resultCheck->getNextNode();
+                        assert(isa<BranchInst>(branchI) &&
+                               "Branch instruction expected!");
+                        BranchInst *branch = dyn_cast<BranchInst>(branchI);
+                        assert(branch->getNumOperands() == 3);
+
+                        Value *pathOK = branch->getOperand(1);
+                        assert(isa<BasicBlock>(pathOK) &&
+                               "Expected basic block!");
+                        
+                        bool foundKernelName = false;
+                        BasicBlock *blockOK = dyn_cast<BasicBlock>(pathOK);
+                        for(Instruction& curI : *blockOK) {
+                            if (isa<CallInst>(&curI)) {
+                                CallInst *pcsf = dyn_cast<CallInst>(&curI); 
+                                std::string kernel =
+                                 demangle(pcsf->getCalledFunction()->getName());
+                                foundKernelName = true;
+
+                                // HACKZ HACKZ HACKZ HACKZ HACKZ HACKZ HACKZ
+                                kernel =
+                                    kernel.substr(0, kernel.find_first_of('('));
+
+                                if (kernel == CLKernelName) {
+                                    scaleGrid(&B, callInst, rpcScaleDim);
+                                }
+                            }
+                        }
+
+                        assert(foundKernelName && "Kernel name not found!");                      
                     }
                 }
             }
@@ -180,6 +282,37 @@ void CUDACoarseningPass::analyzeKernel(Function& F)
     m_postDomT = &getAnalysis<PostDominatorTreeWrapperPass>(F).getPostDomTree();
     m_domT = &getAnalysis<DominatorTreeWrapperPass>(F).getDomTree();
     m_divergenceAnalysis = &getAnalysis<DivergenceAnalysisPass>(F);
+}
+
+void CUDACoarseningPass::scaleGrid(BasicBlock *configBlock,
+                                   CallInst   *configCall,
+                                   Constant   *scaleFunc)
+{
+    // operand #0 -> load ... gridDim (64b (x, y))
+    // operand #1 -> load ... gridDim (32b (z))
+    // operand #2 -> load ... blockDim (64b (x, y))
+    // operand #3 -> load ... blockDim (32b (z))
+
+    if (m_blockLevel) {
+        // blockLevel(); TODO
+        return;
+    }
+
+    // Thread level coarsening scaling
+    // TODO non pow2
+    LoadInst *loadXY = dyn_cast<LoadInst>(configCall->getOperand(2));
+    LoadInst *loadZ = dyn_cast<LoadInst>(configCall->getOperand(3));
+    IRBuilder<> builder(loadZ);
+    builder.SetInsertPoint(configBlock, ++builder.GetInsertPoint());
+    Value* args[] = {loadXY->getPointerOperand(),
+                     loadZ->getPointerOperand(),
+                     builder.getInt32(m_factor),
+                     builder.getInt8(m_dimX),
+                     builder.getInt8(m_dimY),
+                     builder.getInt8(m_dimZ)};
+    CallInst *scaleCall = builder.CreateCall(scaleFunc, args);
+    loadXY->moveAfter(scaleCall);
+    loadZ->moveAfter(loadXY);
 }
 
 static RegisterPass<CUDACoarseningPass> X("cuda-coarsening-pass",

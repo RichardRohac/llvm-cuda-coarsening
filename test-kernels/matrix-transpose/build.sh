@@ -26,27 +26,33 @@ $LLVM_BIN_DIR/clang++ -c -emit-llvm ./matrix-transpose.cu                     \
 $LLVM_BIN_DIR/llvm-dis ./host.bc
 $LLVM_BIN_DIR/llvm-dis ./device.bc
 
-# Assemble hostcode
-$LLVM_BIN_DIR/llc -O0 -debugger-tune=gdb -filetype=obj -o hostcode.o host.bc
-
 # Modify host kernel launch routines
 $LLVM_BIN_DIR/opt -load $LLVM_BUILD_DIR/lib/LLVMCUDACoarsening.so             \
                   -cuda-coarsening-pass                                       \
-                  -coarsened-kernel transposeNaive -coarsening-factor 2       \
-                  -debug-pass=Structure <host.bc > host_coarsened.bc
+                  -coarsened-kernel transposeNaive                            \
+                  -coarsening-dimension x                                     \
+                  -coarsening-factor 2                                        \
+                  -debug-pass=Structure < host.bc > host_coarsened.bc
 
 # Optimize the device code using our pass
 $LLVM_BIN_DIR/opt -load $LLVM_BUILD_DIR/lib/LLVMCUDACoarsening.so             \
                   -cuda-coarsening-pass                                       \
-                  -coarsened-kernel transposeNaive -coarsening-factor 2       \
+                  -coarsened-kernel transposeNaive                            \
+                  -coarsening-dimension x                                     \
+                  -coarsening-factor 2                                        \
                   -debug-pass=Structure < device.bc > device_coarsened.bc
 
 # Generate readable versions
 $LLVM_BIN_DIR/llvm-dis ./host_coarsened.bc
 $LLVM_BIN_DIR/llvm-dis ./device_coarsened.bc
 
+# Assemble hostcode
+$LLVM_BIN_DIR/llc -O0 -debugger-tune=gdb -filetype=obj -o hostcode.o          \
+                  host_coarsened.bc
+
 # Produce PTX
-$LLVM_BIN_DIR/llc -mcpu=$DEVICE_ARCH -o kernel.$DEVICE_ARCH.ptx device.bc
+$LLVM_BIN_DIR/llc -mcpu=$DEVICE_ARCH -o kernel.$DEVICE_ARCH.ptx               \
+                  device_coarsened.bc
 
 # Assemble
 $CUDA_BIN_DIR/ptxas -m64                                                      \
