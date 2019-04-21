@@ -23,11 +23,41 @@
 #include "Util.h"
 #include "DivergenceAnalysisPass.h"
 
+#include <cxxabi.h>
+
+// https://gcc.gnu.org/onlinedocs/libstdc++/manual/ext_demangling.html
+inline std::string demangle(std::string mangledName)
+{
+    int status = -1;
+
+    std::unique_ptr<char, decltype(std::free) *> result{
+        abi::__cxa_demangle(mangledName.c_str(), NULL, NULL, &status),
+        std::free
+    };
+
+    return (status == 0) ? result.get() : mangledName;
+}
+
 // Command line parameters
+cl::opt<std::string> CLKernelName("coarsened-kernel",
+                                  cl::init(""),
+                                  cl::Hidden,
+                                  cl::desc("Name of the kernel to coarsen"));
+
+cl::opt<unsigned int> CLCoarseningFactor("coarsening-factor",
+                                         cl::init(1),
+                                         cl::Hidden,
+                                         cl::desc("Coarsening factor"));
+
+cl::opt<unsigned int> CLCoarseningStride("coarsening-stride",
+                                         cl::init(1),
+                                         cl::Hidden,
+                                         cl::desc("Coarsening stride"));
+
 cl::opt<int> CLCoarseningDirection("coarsening-direction",
                                    cl::init(0),
                                    cl::Hidden,
-                                   cl::desc("Coarsening Direction"));
+                                   cl::desc("Coarsening direction"));
 
 using namespace llvm;
 
@@ -42,8 +72,10 @@ CUDACoarseningPass::CUDACoarseningPass()
 
 bool CUDACoarseningPass::runOnModule(Module& M)
 {
-    errs() << "\nInvoked CUDA COARSENING PASS (MODULE LEVEL) ";
-    errs() << "on module: " << M.getName() << "\n";
+    errs() << "\nInvoked CUDA COARSENING PASS (MODULE LEVEL) "
+           << "on module: " << M.getName()
+           << " -- kernel: " << CLKernelName << " " << CLCoarseningFactor
+           << "x" << " with stride " << CLCoarseningStride << "\n";
 
     bool result = false;
 
@@ -98,7 +130,9 @@ bool CUDACoarseningPass::handleDeviceCode(Module& M)
     for (auto& F : M) {
         if (Util::isKernelFunction(F) && !F.isDeclaration()) {
             foundKernel = true;
-            errs() << "--  INFO  -- Found CUDA kernel: " << F.getName() << "\n";
+
+            std::string name = demangle(F.getName());
+            errs() << "--  INFO  -- Found CUDA kernel: " << name << "\n";
 
             analyzeKernel(F);
         }
@@ -125,9 +159,11 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
 
                     if (calledF->getName() == CUDA_RUNTIME_LAUNCH) {
                         foundGrid = true;
-                        errs() << callInst->getCalledFunction()->getName();
-                        callInst->print(errs());
-                        errs() << "\n";                        
+                       // std::string name = 
+                      //      demangle(callInst->getCalledFunction()->getgetName());
+                     //   errs() << name;
+                     //   callInst->print(errs());
+                      //  errs() << "\n";                        
                     }
                 }
             }

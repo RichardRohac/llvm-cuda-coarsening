@@ -52,8 +52,8 @@ void GridAnalysisPass::getAnalysisUsage(AnalysisUsage& AU) const
 
 bool GridAnalysisPass::runOnFunction(Function& F)
 {
-    errs() << "--  INFO  -- Grid analysis invoked on: ";
-    errs().write_escaped(F.getName()) << '\n';
+    //errs() << "--  INFO  -- Grid analysis invoked on: ";
+    //errs().write_escaped(F.getName()) << '\n';
 
     init();
     analyse(&F);

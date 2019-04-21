@@ -32,11 +32,13 @@ $LLVM_BIN_DIR/llc -O0 -debugger-tune=gdb -filetype=obj -o hostcode.o host.bc
 # Modify host kernel launch routines
 $LLVM_BIN_DIR/opt -load $LLVM_BUILD_DIR/lib/LLVMCUDACoarsening.so             \
                   -cuda-coarsening-pass                                       \
+                  -coarsened-kernel transposeNaive -coarsening-factor 2       \
                   -debug-pass=Structure <host.bc > host_coarsened.bc
 
 # Optimize the device code using our pass
 $LLVM_BIN_DIR/opt -load $LLVM_BUILD_DIR/lib/LLVMCUDACoarsening.so             \
                   -cuda-coarsening-pass                                       \
+                  -coarsened-kernel transposeNaive -coarsening-factor 2       \
                   -debug-pass=Structure < device.bc > device_coarsened.bc
 
 # Generate readable versions

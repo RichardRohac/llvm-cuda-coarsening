@@ -46,8 +46,8 @@ void DivergenceAnalysisPass::getAnalysisUsage(AnalysisUsage& AU) const
 
 bool DivergenceAnalysisPass::runOnFunction(Function& F)
 {
-    errs() << "--  INFO  -- Divergence analysis invoked on: ";
-    errs().write_escaped(F.getName()) << '\n';
+    //errs() << "--  INFO  -- Divergence analysis invoked on: ";
+    //errs().write_escaped(F.getName()) << '\n';
 
     clear();
 
