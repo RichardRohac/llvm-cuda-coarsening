@@ -39,6 +39,8 @@ private:
     void findDivergentBranches();
     void findRegions();
 
+    RegionVector cleanUpRegions(RegionVector& regions, const DominatorTree *dt);
+
     // DATA
     InstVector         m_divergent;
     InstVector         m_divergentBranches;

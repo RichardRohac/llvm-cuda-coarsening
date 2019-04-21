@@ -144,7 +144,7 @@
       tile[threadIdx.y+j][threadIdx.x] = idata[(y+j)*width + x];
  
    __syncthreads();
- 
+
    x = blockIdx.y * TILE_DIM + threadIdx.x;  // transpose block offset
    y = blockIdx.x * TILE_DIM + threadIdx.y;
  

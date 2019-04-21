@@ -131,6 +131,43 @@ void DivergenceAnalysisPass::findRegions()
 
         m_regions.push_back(new DivergentRegion(header, exiting));
     }
+
+    // Remove redundant regions. The ones coming from loops.
+    m_regions = cleanUpRegions(m_regions, m_domT);
+}
+
+RegionVector DivergenceAnalysisPass::cleanUpRegions(RegionVector&        regions,
+                                                    const DominatorTree *dt)
+{
+    RegionVector result;
+
+    for (size_t index1 = 0; index1 < regions.size(); ++index1) {
+        DivergentRegion *region1 = regions[index1];
+        BlockVector &blocks1 = region1->getBlocks();
+  
+        bool toAdd = true;
+
+        for (size_t index2 = 0; index2 < regions.size(); ++index2) {
+            if(index2 == index1) 
+                break;
+
+            DivergentRegion *region2 = regions[index2];
+            BlockVector &blocks2 = region2->getBlocks();
+
+            if (is_permutation(blocks1.begin(),
+                               blocks1.end(),
+                               blocks2.begin()) &&
+                dt->dominates(region2->getHeader(), region1->getHeader())) {
+                toAdd = false;
+                break; 
+            }
+        }
+
+        if(toAdd) 
+        result.push_back(region1); 
+    }
+
+    return result;
 }
 
 static RegisterPass<DivergenceAnalysisPass> X("cuda-divergence-analysis-pass",
