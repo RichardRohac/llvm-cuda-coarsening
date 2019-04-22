@@ -42,6 +42,8 @@ class CUDACoarseningPass : public ModulePass {
                    CallInst   *configCall,
                    Constant   *scaleFunc);
 
+    void amendConfiguration(Module& M, BasicBlock *configOKBlock);
+
     // DATA
     LoopInfo               *m_loopInfo;
     PostDominatorTree      *m_postDomT;

@@ -11,13 +11,13 @@ DEVICE_COMPUTE_ARCH=compute_61
 # -----------------------------------------------------------------------------
 
 # Compile the input hostcode into the LLVM IR using CUDA 9.2
-$LLVM_BIN_DIR/clang++ -c -emit-llvm ./matrix-transpose.cu                     \
+$LLVM_BIN_DIR/clang++ -c -emit-llvm -O3 ./matrix-transpose.cu                 \
                       --cuda-path=/opt/cuda-9.2                               \
                       --cuda-gpu-arch=$DEVICE_ARCH                            \
                       --cuda-host-only -o host.bc
 
 # Compile the input device code into the LLVM IR using CUDA 9.2
-$LLVM_BIN_DIR/clang++ -c -emit-llvm ./matrix-transpose.cu                     \
+$LLVM_BIN_DIR/clang++ -c -emit-llvm -O3 ./matrix-transpose.cu                 \
                       --cuda-path=/opt/cuda-9.2                               \
                       --cuda-gpu-arch=$DEVICE_ARCH                            \
                       --cuda-device-only -o device.bc

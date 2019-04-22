@@ -220,57 +220,125 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
     //Value *loadX = builder.CreateLoad(builder.getInt32Ty(), xy, "x");
     //Value *divX = builder.CreateUDiv()
 
-    // In case of the host code, look for "cudaLaunch" invocations
     for (Function& F : M) {
-        // Function consists of basic blocks, which in turn consist of
-        // instructions.
-        for (BasicBlock& B : F) {
+        for (BasicBlock& B: F) {
             for (Instruction& I : B) {
                 Instruction *pI = &I;
                 if (CallInst *callInst = dyn_cast<CallInst>(pI)) {
                     Function *calledF = callInst->getCalledFunction();
 
-                    if (calledF->getName() == CUDA_RUNTIME_CONFIGURECALL) {
+                    if (calledF->getName() == CUDA_RUNTIME_LAUNCH) {
+                        // cudaLaunch receives function pointer as an argument.
+                        Constant *castPtr = 
+                                        cast<Constant>(callInst->getOperand(0));
+                        Function *kernelF =
+                                         cast<Function>(castPtr->getOperand(0));
+                        std::string kernel = kernelF->getName();
+                        
+                        kernel = demangle(kernel);
+                        kernel = kernel.substr(0, kernel.find_first_of('('));
+
+                        if (kernel != m_kernelName) {
+                            continue;
+                        }
+
+                        errs() << "Found cudaLaunch of " << kernel << "\n";
                         foundGrid = true;
 
-                        Instruction *resultCheck = callInst->getNextNode();
-                        assert(isa<ICmpInst>(resultCheck) &&
-                               "Result comparison instruction expected!");
-                        Instruction *branchI = resultCheck->getNextNode();
-                        assert(isa<BranchInst>(branchI) &&
-                               "Branch instruction expected!");
-                        BranchInst *branch = dyn_cast<BranchInst>(branchI);
-                        assert(branch->getNumOperands() == 3);
+                        // Call to cudaLaunch is preceded by "numArgs()" of
+                        // blocks, where the very first one is referenced by
+                        // the unconditional branch instruction that checks
+                        // for valid configuration (call to cudaConfigureCall).
+                        BasicBlock *configOKBlock = &B;
+                        for (unsigned int i = 0;
+                             i < kernelF->arg_size();
+                             ++i) {
+                                 configOKBlock = configOKBlock->getPrevNode();
+                        }
 
-                        Value *pathOK = branch->getOperand(1);
-                        assert(isa<BasicBlock>(pathOK) &&
-                               "Expected basic block!");
-                        
-                        bool foundKernelName = false;
-                        BasicBlock *blockOK = dyn_cast<BasicBlock>(pathOK);
-                        for(Instruction& curI : *blockOK) {
-                            if (isa<CallInst>(&curI)) {
-                                CallInst *pcsf = dyn_cast<CallInst>(&curI); 
-                                std::string kernel =
-                                 demangle(pcsf->getCalledFunction()->getName());
-                                foundKernelName = true;
+                        // FIXED!
+                        // Depending on the optimization level, we might be
+                        // in a _kernelname_() function call.
+                        std::string pn = demangle(
+                                         configOKBlock->getParent()->getName());
+                        pn = pn.substr(0, pn.find_first_of('('));
 
-                                // HACKZ HACKZ HACKZ HACKZ HACKZ HACKZ HACKZ
-                                kernel =
-                                    kernel.substr(0, kernel.find_first_of('('));
-
-                                if (kernel == CLKernelName) {
-                                    scaleGrid(&B, callInst, rpcScaleDim);
+                        if (pn == kernel) {
+                            for (Function& xF : M) {
+                                for (BasicBlock& xB: xF) {
+                                    for (Instruction& xI : xB) {
+                                        Instruction *pxI = &xI;
+                                        if (CallInst *callInst = dyn_cast<CallInst>(pxI)) {
+                                            Function *calledxF = callInst->getCalledFunction();
+                                            if (calledxF == configOKBlock->getParent()) {
+                                                amendConfiguration(M, callInst->getParent());
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
-
-                        assert(foundKernelName && "Kernel name not found!");                      
+                        else {
+                            amendConfiguration(M, configOKBlock);
+                        }
                     }
                 }
             }
         }
     }
+
+     //   errs() << "Found invokation to: " << kernelInvokation->getCalledFunction()->getName() << "\n";
+
+        // Function consists of basic blocks, which in turn consist of
+        // instructions.
+        // for (BasicBlock& B : F) {
+        //     for (Instruction& I : B) {
+        //         Instruction *pI = &I;
+        //         if (CallInst *callInst = dyn_cast<CallInst>(pI)) {
+        //             Function *calledF = callInst->getCalledFunction();
+
+        //             if (calledF->getName() == CUDA_RUNTIME_CONFIGURECALL) {
+        //                 foundGrid = true;
+
+
+
+        //                 Instruction *resultCheck = callInst->getNextNode();
+        //                 assert(isa<ICmpInst>(resultCheck) &&
+        //                        "Result comparison instruction expected!");
+        //                 Instruction *branchI = resultCheck->getNextNode();
+        //                 assert(isa<BranchInst>(branchI) &&
+        //                        "Branch instruction expected!");
+        //                 BranchInst *branch = dyn_cast<BranchInst>(branchI);
+        //                 assert(branch->getNumOperands() == 3);
+
+        //                 Value *pathOK = branch->getOperand(1);
+        //                 assert(isa<BasicBlock>(pathOK) &&
+        //                        "Expected basic block!");
+                        
+        //                 bool foundKernelName = false;
+        //                 BasicBlock *blockOK = dyn_cast<BasicBlock>(pathOK);
+        //                 for(Instruction& curI : *blockOK) {
+        //                     if (isa<CallInst>(&curI)) {
+        //                         CallInst *pcsf = dyn_cast<CallInst>(&curI); 
+        //                         std::string kernel =
+        //                          demangle(pcsf->getCalledFunction()->getName());
+        //                         foundKernelName = true;
+
+        //                         // HACKZ HACKZ HACKZ HACKZ HACKZ HACKZ HACKZ
+        //                         kernel =
+        //                             kernel.substr(0, kernel.find_first_of('('));
+
+        //                         if (kernel == CLKernelName) {
+        //                             scaleGrid(&B, callInst, rpcScaleDim);
+        //                         }
+        //                     }
+        //                 }
+
+        //                 assert(foundKernelName && "Kernel name not found!");                      
+        //             }
+        //         }
+        //     }
+    //}
 
     return foundGrid;
 }
@@ -313,6 +381,60 @@ void CUDACoarseningPass::scaleGrid(BasicBlock *configBlock,
     CallInst *scaleCall = builder.CreateCall(scaleFunc, args);
     loadXY->moveAfter(scaleCall);
     loadZ->moveAfter(loadXY);
+}
+
+void CUDACoarseningPass::amendConfiguration(Module&     M,
+                                            BasicBlock *configOKBlock)
+{
+    if (configOKBlock == nullptr) {
+        assert(0 && "Found cudaLaunch without corresponding config block!");
+    }
+
+    // Find branch instruction jumping to the "configOK" block.
+    // This instruction is located within a block that handles
+    // cudaConfigureCall().
+    BasicBlock *configBlock = nullptr;
+    for (Function& F : M) {
+        for (BasicBlock& B: F) {
+            for (Instruction& I : B) {
+                if (isa<BranchInst>(&I)) {
+                    BranchInst *bI = cast<BranchInst>(&I);
+                    if (bI->getNumOperands() == 3) {
+                        if(isa<BasicBlock>(bI->getOperand(1))) {
+                            BasicBlock *targetBlock =
+                                            cast<BasicBlock>(bI->getOperand(1));
+
+                            if (targetBlock == configOKBlock) {
+                                configBlock = bI->getParent();
+                            }
+                        }
+                        
+                        if(isa<BasicBlock>(bI->getOperand(2))) {
+                            BasicBlock *targetBlock =
+                                            cast<BasicBlock>(bI->getOperand(2));
+
+                            if (targetBlock == configOKBlock) {
+                                configBlock = bI->getParent();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    assert(configBlock != nullptr);
+
+    for (Instruction& I : *configBlock) {
+        Instruction *pI = &I;
+        if (CallInst *callInst = dyn_cast<CallInst>(pI)) {
+            Function *calledF = callInst->getCalledFunction();
+
+            if (calledF->getName() == CUDA_RUNTIME_CONFIGURECALL) {
+                scaleGrid(configBlock, callInst, rpcScaleDim);
+            }
+        } 
+    }
 }
 
 static RegisterPass<CUDACoarseningPass> X("cuda-coarsening-pass",
