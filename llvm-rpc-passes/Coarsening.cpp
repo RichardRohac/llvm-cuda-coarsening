@@ -37,6 +37,21 @@ void CUDACoarseningPass::coarsenKernel()
                   });
 }
 
+void CUDACoarseningPass::replacePlaceholders()
+{
+  // Replace placeholders.
+  for (auto &mapIter : m_phMap) {
+      InstVector &phs = mapIter.second;
+      // Iteate over placeholder vector.
+      for (auto ph : phs) {
+          Value *replacement = m_phReplacementMap[ph];
+          if (replacement != nullptr && ph != replacement) {
+              ph->replaceAllUsesWith(replacement);
+          }
+      }
+  }
+}
+
 void CUDACoarseningPass::replicateInstruction(Instruction *inst)
 {
     InstVector current;

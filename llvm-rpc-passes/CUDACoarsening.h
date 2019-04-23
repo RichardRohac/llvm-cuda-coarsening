@@ -37,6 +37,9 @@ class CUDACoarseningPass : public ModulePass {
     // MODIFIERS
     bool handleDeviceCode(Module& M);
     bool handleHostCode(Module& M);
+
+    void generateVersions(Function& F);
+    std::string namedKernelVersion(std::string kernel, int b, int t, int s);
     
     void analyzeKernel(Function& F);
     void scaleKernelGrid();
@@ -45,6 +48,7 @@ class CUDACoarseningPass : public ModulePass {
     void scaleGrid(BasicBlock *configBlock, CallInst *configCall);
 
     void coarsenKernel();
+    void replacePlaceholders();
 
     void replicateInstruction(Instruction *inst);
     void replicateRegion(DivergentRegion *region);
@@ -80,12 +84,14 @@ class CUDACoarseningPass : public ModulePass {
     Map                     m_phReplacementMap;
 
     Function               *m_cudaConfigureCallScaled;
+    Function               *m_readEnvConfig;
 
     // CL config
     std::string             m_kernelName;
     unsigned int            m_factor;
     unsigned int            m_stride;
     bool                    m_blockLevel;
+    bool                    m_dynamicLevel;
     bool                    m_dimX;
     bool                    m_dimY;
     bool                    m_dimZ;

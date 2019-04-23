@@ -17,6 +17,7 @@
 #include "llvm/IR/IRBuilder.h"
 
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/Transforms/Utils/Cloning.h"
 
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/PostDominators.h"
@@ -28,6 +29,7 @@
 #include "GridAnalysisPass.h"
 
 #include <cxxabi.h>
+#include <stdlib.h>
 
 // https://gcc.gnu.org/onlinedocs/libstdc++/manual/ext_demangling.html
 inline std::string demangle(std::string mangledName)
@@ -83,12 +85,13 @@ bool CUDACoarseningPass::runOnModule(Module& M)
 {
     // Parse command line configuration
     m_kernelName = CLKernelName;
-    if (m_kernelName == "") {
-        // As the kernel name was not specified, generate runtime dispatcher
-        // TODO
-    }
-
+    assert(m_kernelName != "");
+    assert((CLCoarseningMode == "block" ||
+           CLCoarseningMode == "thread" ||
+           CLCoarseningMode == "dynamic") &&
+           "Wrong mode specified!");
     m_blockLevel = CLCoarseningMode == "block";
+    m_dynamicLevel = CLCoarseningMode == "dynamic";
     m_factor = CLCoarseningFactor;
     m_stride = CLCoarseningStride;
     m_dimX = CLCoarseningDimension.find('x') != std::string::npos;
@@ -98,7 +101,7 @@ bool CUDACoarseningPass::runOnModule(Module& M)
     errs() << "\nInvoked CUDA COARSENING PASS (MODULE LEVEL) "
            << "on module: " << M.getName()
            << " -- kernel: " << CLKernelName << " " << CLCoarseningFactor
-           << "x " << (m_blockLevel ? "block" : "thread") << " level mode" 
+           << "x " << CLCoarseningMode << " mode" 
            << " with stride " << CLCoarseningStride << "\n";
 
     bool result = false;
@@ -108,14 +111,14 @@ bool CUDACoarseningPass::runOnModule(Module& M)
         // Device code gets extended with coarsened versions of the kernels.
         // For example:
         // -----------------------------------------------------------------
-        // kernelXYZ -> kernelXYZ_1x_2x kernelXYZ_1x_4x kernelXYZ_1x_8x ...
-        //              kernelXYZ_2x_1x
-        //              kernelXYZ_4x_1x
-        //              kernelXYZ_8x_1x
-        //              ...
+        // XYZ -> XYZ_1x_2x_<stride> XYZ_1x_4x_<stride> XYZ_1x_8x_<stride> ...
+        //        XYZ_2x_1x_1x
+        //        XYZ_4x_1x_1x
+        //        XYZ_8x_1x_1x
+        //        ...
         // -----------------------------------------------------------------
         // Where the numbering in the kernel names is defined as follows:
-        // <block_level_coarsening_factor>_<thread_level_coarsening_factor>
+        // <block_factor>_<thread_factor>_<stride_factor>
         // -----------------------------------------------------------------
         result = handleDeviceCode(M);
     }
@@ -165,21 +168,15 @@ bool CUDACoarseningPass::handleDeviceCode(Module& M)
 
             errs() << "--  INFO  -- Found CUDA kernel: " << name << "\n";
 
+            if (m_dynamicLevel) {
+                //generateVersions(F);
+                continue;
+            }
+
             analyzeKernel(F);
             scaleKernelGrid();
             coarsenKernel();
-
-            // Replace placeholders.
-            for (auto &mapIter : m_phMap) {
-                InstVector &phs = mapIter.second;
-                // Iteate over placeholder vector.
-                for (auto ph : phs) {
-                    Value *replacement = m_phReplacementMap[ph];
-                    if (replacement != nullptr && ph != replacement) {
-                        ph->replaceAllUsesWith(replacement);
-                    }
-                }
-            }
+            replacePlaceholders();
         }
     }
 
@@ -194,6 +191,12 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
 
     m_cudaConfigureCallScaled = nullptr;
     insertCudaConfigureCallScaled(M);
+
+    //if (m_dynamicLevel) {
+    //    Constant* envFunc = M.getOrInsertFunction(
+    //        "rpcReadEnv", Type::getVoidTy(M.getContext()), Type::getInt32Ty(Ctx), NULL
+    //        );
+    //}
 
     std::vector<CallInst*> toRemove;
 
@@ -330,6 +333,61 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
     //}
 
     return foundGrid;
+}
+
+void CUDACoarseningPass::generateVersions(Function& F)
+{
+    std::vector<unsigned int> factors = {2, 4, 8, 16};
+    std::vector<unsigned int> strides = {1, 2, 4};
+
+    for (auto factor : factors) {
+        for (auto stride : strides) {
+            Module *M = F.getParent();
+            llvm::ValueToValueMapTy vMap;
+            Function *cloned = llvm::CloneFunction(&F, vMap);
+            cloned->setName(namedKernelVersion(F.getName(), 1, factor, stride));
+
+            unsigned int savedFactor = m_factor;
+            unsigned int savedStride = m_stride;
+            bool savedBlockLevel = m_blockLevel;
+
+            m_factor = factor;
+            m_stride = stride;
+            m_blockLevel = false;
+
+            analyzeKernel(*cloned);
+            scaleKernelGrid();
+            coarsenKernel();
+            replacePlaceholders();
+
+            m_factor = savedFactor;
+            m_stride = savedStride;
+            m_blockLevel = savedBlockLevel;
+            //F.getMetadata("nvvm.annotations")->getOperand(0)->dump();
+            //cloned->setMetadata("nvvm.annotations", F.getMetadata("nvvm.annotations"));
+            
+        }
+    }
+                //errs() << "--  INFO  -- Found CUDA kernel: " << name << "\n";
+
+           // analyzeKernel(F);
+          //  scaleKernelGrid();
+           // coarsenKernel();
+          //  replacePlaceholders();
+}
+
+std::string CUDACoarseningPass::namedKernelVersion(std::string kernel,
+                                                   int b, int t, int s)
+{
+    // Generate <kernel>_<blockfactor>_<threadfactor>_<stride> name
+    std::string name = kernel;
+    name.append("_");
+    name.append(std::to_string(b));
+    name.append("_");
+    name.append(std::to_string(t));
+    name.append("_");
+    name.append(std::to_string(s));
+    return name;
 }
 
 void CUDACoarseningPass::analyzeKernel(Function& F)
