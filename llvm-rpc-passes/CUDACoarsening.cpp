@@ -16,6 +16,8 @@
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/IRBuilder.h"
 
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
+
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/PostDominators.h"
 
@@ -123,7 +125,7 @@ bool CUDACoarseningPass::runOnModule(Module& M)
         // -----------------------------------------------------------------
         result = handleHostCode(M);
     }
-    errs() << "End of CUDA coarsening pass!" << "\n\n";
+    errs() << "--  INFO  -- End of CUDA coarsening pass!" << "\n\n";
 
     return result;
 }
@@ -167,58 +169,10 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
 
     bool foundGrid = false;
 
-    LLVMContext& ctx = M.getContext();
-    Constant *rpcScaleDim = M.getOrInsertFunction(
-        "rpcScaleDim",
-        Type::getVoidTy(ctx),
-        // *XY, *Z, factor, x, y, z
-        Type::getInt64PtrTy(ctx),
-        Type::getInt32PtrTy(ctx),
-        Type::getInt32Ty(ctx),
-        Type::getInt8Ty(ctx),
-        Type::getInt8Ty(ctx),
-        Type::getInt8Ty(ctx)
-    );
+    m_cudaConfigureCallScaled = nullptr;
+    insertCudaConfigureCallScaled(M);
 
-    Function *rpcScaleDimF = cast<Function>(rpcScaleDim);
-    rpcScaleDimF->setCallingConv(CallingConv::C);
-
-    Function::arg_iterator args = rpcScaleDimF->arg_begin();
-    Value *xy = args++;
-    xy->setName("xy");
-    Value *z = args++;
-    z->setName("z");
-    Value *factor = args++;
-    factor->setName("factor");
-    Value *dimX = args++;
-    dimX->setName("dimX");
-    Value *dimY = args++;
-    dimY->setName("dimY");
-    Value *dimZ = args++;
-    dimZ->setName("dimZ");
-
-    BasicBlock* block = BasicBlock::Create(ctx, "entry", rpcScaleDimF);
-    BasicBlock *blockX = BasicBlock::Create(ctx, "blockX", rpcScaleDimF);
-    IRBuilder<> builder(block);
-
-    Value *enableX = builder.CreateICmpEQ(dimX, builder.getInt8(1));
-    BasicBlock *blockXEnd = BasicBlock::Create(ctx, "blockXEnd", rpcScaleDimF);
-    Value *bX = builder.CreateCondBr(enableX, blockX, blockXEnd);
-
-    builder.SetInsertPoint(blockX);
-   // Value *castX = builder.CreateBitCast(xy, Type::getInt32PtrTy(ctx), "x");
-    Value *loadX = builder.CreateLoad(xy, builder.getInt64Ty(), "x_val");
-    Value *factorCast = builder.CreateIntCast(factor, builder.getInt64Ty(), false);
-    Value *divX = builder.CreateUDiv(loadX, factorCast, "scaled_x");
-    //Value *castDivX = builder.CreateIntCast(divX, Type::getInt64Ty(ctx), false, "cast_div_x");
-    Value *savedX = builder.CreateAlignedStore(divX, xy, 4);
-    builder.CreateBr(blockXEnd);
-    
-    builder.SetInsertPoint(blockXEnd);
-    ReturnInst *ret = builder.CreateRetVoid();
-
-    //Value *loadX = builder.CreateLoad(builder.getInt32Ty(), xy, "x");
-    //Value *divX = builder.CreateUDiv()
+    std::vector<CallInst*> toRemove;
 
     for (Function& F : M) {
         for (BasicBlock& B: F) {
@@ -242,7 +196,7 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
                             continue;
                         }
 
-                        errs() << "Found cudaLaunch of " << kernel << "\n";
+                        errs() << "--  INFO  -- Found cudaLaunch of " << kernel << "\n";
                         foundGrid = true;
 
                         // Call to cudaLaunch is preceded by "numArgs()" of
@@ -271,7 +225,9 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
                                         if (CallInst *callInst = dyn_cast<CallInst>(pxI)) {
                                             Function *calledxF = callInst->getCalledFunction();
                                             if (calledxF == configOKBlock->getParent()) {
-                                                amendConfiguration(M, callInst->getParent());
+                                                CallInst *rem = amendConfiguration(M, callInst->getParent());
+                                                assert(rem != nullptr);
+                                                toRemove.push_back(rem);
                                             }
                                         }
                                     }
@@ -279,12 +235,22 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
                             }
                         }
                         else {
-                            amendConfiguration(M, configOKBlock);
+                            CallInst *rem = amendConfiguration(M, configOKBlock);
+                            assert(rem != nullptr);
+                            toRemove.push_back(rem);
                         }
                     }
                 }
             }
         }
+    }
+
+    for(CallInst *rem : toRemove) {
+        rem->eraseFromParent();
+    }
+
+    if (!foundGrid && m_cudaConfigureCallScaled != nullptr) {
+        m_cudaConfigureCallScaled->eraseFromParent();
     }
 
      //   errs() << "Found invokation to: " << kernelInvokation->getCalledFunction()->getName() << "\n";
@@ -353,39 +319,45 @@ void CUDACoarseningPass::analyzeKernel(Function& F)
 }
 
 void CUDACoarseningPass::scaleGrid(BasicBlock *configBlock,
-                                   CallInst   *configCall,
-                                   Constant   *scaleFunc)
+                                   CallInst   *configCall)
 {
-    // operand #0 -> load ... gridDim (64b (x, y))
-    // operand #1 -> load ... gridDim (32b (z))
-    // operand #2 -> load ... blockDim (64b (x, y))
-    // operand #3 -> load ... blockDim (32b (z))
+    uint8_t coarseningGrid[CUDA_MAX_DIM];
+    uint8_t coarseningBlock[CUDA_MAX_DIM];
+
+    coarseningBlock[0] = coarseningBlock[1] = coarseningBlock[2] = 1;
 
     if (m_blockLevel) {
-        // blockLevel(); TODO
+        assert(0 && "Block level coarsening not supported yet.");
         return;
     }
 
-    // Thread level coarsening scaling
-    // TODO non pow2
-    LoadInst *loadXY = dyn_cast<LoadInst>(configCall->getOperand(2));
-    LoadInst *loadZ = dyn_cast<LoadInst>(configCall->getOperand(3));
-    IRBuilder<> builder(loadZ);
-    builder.SetInsertPoint(configBlock, ++builder.GetInsertPoint());
-    Value* args[] = {loadXY->getPointerOperand(),
-                     loadZ->getPointerOperand(),
-                     builder.getInt32(m_factor),
-                     builder.getInt8(m_dimX),
-                     builder.getInt8(m_dimY),
-                     builder.getInt8(m_dimZ)};
-    CallInst *scaleCall = builder.CreateCall(scaleFunc, args);
-    loadXY->moveAfter(scaleCall);
-    loadZ->moveAfter(loadXY);
+    coarseningBlock[0] = m_dimX ? m_factor : 1;
+    coarseningBlock[1] = m_dimY ? m_factor : 1;
+    coarseningBlock[2] = m_dimZ ? m_factor : 1;
+
+    IRBuilder<> builder(configCall);
+    SmallVector<Value *, 12> args(configCall->arg_begin(),
+                                  configCall->arg_end());
+
+    args.push_back(builder.getInt8(coarseningGrid[0])); // scale grid X
+    args.push_back(builder.getInt8(coarseningGrid[1])); // scale grid Y
+    args.push_back(builder.getInt8(coarseningGrid[2])); // scale grid Z
+    args.push_back(builder.getInt8(coarseningBlock[0])); // scale block X
+    args.push_back(builder.getInt8(coarseningBlock[1])); // scale block Y
+    args.push_back(builder.getInt8(coarseningBlock[2])); // scale block Z
+
+    CallInst *newCall = builder.CreateCall(m_cudaConfigureCallScaled, args);
+    newCall->setCallingConv(m_cudaConfigureCallScaled->getCallingConv());
+    if (!configCall->use_empty()) {
+        configCall->replaceAllUsesWith(newCall);
+    }
 }
 
-void CUDACoarseningPass::amendConfiguration(Module&     M,
-                                            BasicBlock *configOKBlock)
+CallInst *CUDACoarseningPass::amendConfiguration(Module&     M,
+                                                 BasicBlock *configOKBlock)
 {
+    CallInst *ret = nullptr;
+
     if (configOKBlock == nullptr) {
         assert(0 && "Found cudaLaunch without corresponding config block!");
     }
@@ -431,10 +403,140 @@ void CUDACoarseningPass::amendConfiguration(Module&     M,
             Function *calledF = callInst->getCalledFunction();
 
             if (calledF->getName() == CUDA_RUNTIME_CONFIGURECALL) {
-                scaleGrid(configBlock, callInst, rpcScaleDim);
+                scaleGrid(configBlock, callInst);
+                ret = callInst;
             }
         } 
     }
+
+    return ret;
+}
+
+AllocaInst *CreateAllocaA(IRBuilder<> *b, Type *Ty, Value *ArraySize = nullptr,
+                         const Twine &Name = "", unsigned int align = 8) {
+        const DataLayout &DL = b->GetInsertBlock()->getParent()->getParent()->getDataLayout();
+return b->Insert(new AllocaInst(Ty, DL.getAllocaAddrSpace(), ArraySize, align), Name);
+}
+
+void CUDACoarseningPass::insertCudaConfigureCallScaled(Module& M)
+{
+    LLVMContext& ctx = M.getContext();
+    Function *ptrF;
+
+    Function *original = M.getFunction(CUDA_RUNTIME_CONFIGURECALL);
+    FunctionType *origFT = original->getFunctionType();
+    assert(original != nullptr);
+
+    SmallVector<Type *, 16> scaledArgs;
+    for (auto& arg : origFT->params()) {
+        scaledArgs.push_back(arg);
+    }
+
+    assert(original->arg_size() == 6 && "This ABI is not supported yet!");
+
+    scaledArgs.push_back(Type::getInt8Ty(ctx));
+    scaledArgs.push_back(Type::getInt8Ty(ctx));
+    scaledArgs.push_back(Type::getInt8Ty(ctx));
+    scaledArgs.push_back(Type::getInt8Ty(ctx));
+    scaledArgs.push_back(Type::getInt8Ty(ctx));
+    scaledArgs.push_back(Type::getInt8Ty(ctx));
+
+    Constant *scaled = M.getOrInsertFunction(
+        "cudaConfigureCallScaled",
+        FunctionType::get(original->getReturnType(), scaledArgs, false)
+    );
+
+    ptrF = cast<Function>(scaled);
+    ptrF->setCallingConv(original->getCallingConv());
+
+    Function::arg_iterator argIt = ptrF->arg_begin();
+    Value *gridXY = argIt++; gridXY->setName("gridXY");
+    Value *gridZ = argIt++; gridZ->setName("gridZ");
+    Value *blockXY = argIt++; blockXY->setName("blockXY");
+    Value *blockZ = argIt++; blockZ->setName("blockZ");
+    Value *sharedMem = argIt++; sharedMem->setName("sharedMem");
+    Value *cudaStream = argIt++; cudaStream->setName("cudaStream");
+    Value *scaleGridX = argIt++; scaleGridX->setName("sgX");
+    Value *scaleGridY = argIt++; scaleGridY->setName("sgY");
+    Value *scaleGridZ = argIt++; scaleGridZ->setName("sgZ");
+    Value *scaleBlockX = argIt++; scaleBlockX->setName("sbX");
+    Value *scaleBlockY = argIt++; scaleBlockY->setName("sbY");
+    Value *scaleBlockZ = argIt++; scaleBlockZ->setName("sbZ");
+
+    BasicBlock* block = BasicBlock::Create(ctx, "entry", ptrF);
+    IRBuilder<> builder(block);
+
+    // Allocate space for amended parameters
+    AllocaInst *sgXY =
+              CreateAllocaA(&builder, builder.getInt64Ty(), nullptr, "sgXY", 8);
+    AllocaInst *sgZ =
+               CreateAllocaA(&builder, builder.getInt32Ty(), nullptr, "sgZ", 8);
+    AllocaInst *sbXY =
+              CreateAllocaA(&builder, builder.getInt64Ty(), nullptr, "sbXY", 8);
+    AllocaInst *sbZ =
+               CreateAllocaA(&builder, builder.getInt32Ty(), nullptr, "sbZ", 8);
+    AllocaInst *ssm =
+            CreateAllocaA(&builder, origFT->getParamType(4), nullptr, "ssm", 8);
+    AllocaInst *scs =
+            CreateAllocaA(&builder, origFT->getParamType(5), nullptr, "scs", 8);
+
+    AllocaInst *savedPtrY = CreateAllocaA(&builder, Type::getInt32PtrTy(ctx), nullptr, "", 8);
+
+    builder.CreateAlignedStore(gridXY, sgXY, 8, false);
+    builder.CreateAlignedStore(gridZ, sgZ, 8, false);
+    builder.CreateAlignedStore(blockXY, sbXY, 8, false);
+    builder.CreateAlignedStore(blockZ, sbZ, 8, false);
+    builder.CreateAlignedStore(sharedMem, ssm, 8, false);
+    builder.CreateAlignedStore(cudaStream, scs, 8, false);
+
+    // Scale BLOCK X
+    Value *valBlockX = builder.CreateAlignedLoad(sbXY, 8);
+    Value *valScaledBlockX = 
+        builder.CreateUDiv(valBlockX,
+                           builder.CreateIntCast(scaleBlockX,
+                                                 builder.getInt64Ty(),
+                                                 false));
+    builder.CreateAlignedStore(valScaledBlockX, sbXY, 8, false);
+
+    // Scale BLOCK Y
+    Value *ptrBlockY = builder.CreatePointerCast(sbXY, Type::getInt32PtrTy(ctx));
+    ptrBlockY = builder.CreateInBoundsGEP(ptrBlockY,
+                                          ConstantInt::get(builder.getInt64Ty(),
+                                                           1));
+    Value *valBlockY = builder.CreateAlignedLoad(ptrBlockY, 4);
+    Value *valScaledBlockY = 
+        builder.CreateUDiv(valBlockY,
+                           builder.CreateIntCast(scaleBlockY,
+                                                 builder.getInt32Ty(),
+                                                 false));
+    builder.CreateAlignedStore(valScaledBlockY, ptrBlockY, 4, false);
+
+    // Scale BLOCK Z
+    Value *valBlockZ = builder.CreateAlignedLoad(sbZ, 8);
+    Value *valScaledBlockZ = 
+        builder.CreateUDiv(valBlockZ,
+                           builder.CreateIntCast(scaleBlockZ,
+                                                 builder.getInt32Ty(),
+                                                 false));
+    builder.CreateAlignedStore(valScaledBlockZ, sbZ, 8, false);
+
+    Value *c_sgXY = builder.CreateAlignedLoad(sgXY, 8, "c_sgXY");
+    Value *c_sgZ = builder.CreateAlignedLoad(sgZ, 8, "c_sgZ");
+    Value *c_sbXY = builder.CreateAlignedLoad(sbXY, 8, "c_sbXY");
+    Value *c_sbZ = builder.CreateAlignedLoad(sbZ, 8, "c_sbZ");
+    Value *c_ssm = builder.CreateAlignedLoad(ssm, 8, "c_ssm");
+    Value *c_scs = builder.CreateAlignedLoad(scs, 8, "c_scs"); 
+
+    SmallVector<Value *, 6> callArgs;
+    callArgs.push_back(c_sgXY); callArgs.push_back(c_sgZ);
+    callArgs.push_back(c_sbXY); callArgs.push_back(c_sbZ);
+    callArgs.push_back(c_ssm); callArgs.push_back(c_scs);
+
+    CallInst *cudaCall = builder.CreateCall(original, callArgs);
+
+    builder.CreateRet(cudaCall);
+
+    m_cudaConfigureCallScaled = ptrF;
 }
 
 static RegisterPass<CUDACoarseningPass> X("cuda-coarsening-pass",

@@ -38,17 +38,19 @@ class CUDACoarseningPass : public ModulePass {
     bool handleHostCode(Module& M);
     
     void analyzeKernel(Function& F);
-    void scaleGrid(BasicBlock *configBlock,
-                   CallInst   *configCall,
-                   Constant   *scaleFunc);
+    void scaleGrid(BasicBlock *configBlock, CallInst *configCall);
 
-    void amendConfiguration(Module& M, BasicBlock *configOKBlock);
+    CallInst *amendConfiguration(Module& M, BasicBlock *configOKBlock);
+
+    void insertCudaConfigureCallScaled(Module& M);
 
     // DATA
     LoopInfo               *m_loopInfo;
     PostDominatorTree      *m_postDomT;
     DominatorTree          *m_domT;
     DivergenceAnalysisPass *m_divergenceAnalysis;
+
+    Function               *m_cudaConfigureCallScaled;
 
     // CL config
     std::string             m_kernelName;
