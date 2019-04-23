@@ -26,8 +26,6 @@ Instruction *getModuloInst(Value *value, unsigned int modulo);
 
 void CUDACoarseningPass::scaleKernelGrid()
 {
-    // TODO this is ugly!
-    // TODO multidimensional coarsening investigate.
     if (m_dimX) {
         scaleKernelGridSizes(0);
         scaleKernelGridIDs(0);
@@ -47,7 +45,10 @@ void CUDACoarseningPass::scaleKernelGrid()
 void CUDACoarseningPass::scaleKernelGridSizes(int direction)
 {
     InstVector sizeInsts = 
-                    m_gridAnalysis->getGridSizeDependentInstructions(direction);
+                m_blockLevel
+                ? m_gridAnalysis->getGridSizeDependentInstructions(direction)
+                : m_gridAnalysis->getBlockSizeDependentInstructions(direction);
+
     for (InstVector::iterator iter = sizeInsts.begin();
          iter != sizeInsts.end();
          ++iter) {
@@ -65,7 +66,10 @@ void CUDACoarseningPass::scaleKernelGridIDs(int direction)
     // origTid = [newTid / st] * cf * st + newTid % st + subid * st
     unsigned int cfst = m_factor * m_stride;
 
-    InstVector tids = m_gridAnalysis->getGridIDDependentInstructions(direction);
+    InstVector tids = 
+                m_blockLevel
+                ? m_gridAnalysis->getBlockIDDependentInstructions(direction)
+                : m_gridAnalysis->getThreadIDDependentInstructions(direction);
     for (InstVector::iterator instIter = tids.begin();
         instIter != tids.end();
         ++instIter) {

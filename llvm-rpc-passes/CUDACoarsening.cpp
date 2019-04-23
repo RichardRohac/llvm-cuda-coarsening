@@ -98,7 +98,8 @@ bool CUDACoarseningPass::runOnModule(Module& M)
     errs() << "\nInvoked CUDA COARSENING PASS (MODULE LEVEL) "
            << "on module: " << M.getName()
            << " -- kernel: " << CLKernelName << " " << CLCoarseningFactor
-           << "x" << " with stride " << CLCoarseningStride << "\n";
+           << "x " << (m_blockLevel ? "block" : "thread") << " level mode" 
+           << " with stride " << CLCoarseningStride << "\n";
 
     bool result = false;
 
@@ -351,16 +352,13 @@ void CUDACoarseningPass::scaleGrid(BasicBlock *configBlock,
     uint8_t coarseningGrid[CUDA_MAX_DIM];
     uint8_t coarseningBlock[CUDA_MAX_DIM];
 
-    coarseningBlock[0] = coarseningBlock[1] = coarseningBlock[2] = 1;
+    coarseningGrid[0] = (m_dimX && m_blockLevel) ? m_factor : 1;
+    coarseningGrid[1] = (m_dimY && m_blockLevel) ? m_factor : 1;
+    coarseningGrid[2] = (m_dimZ && m_blockLevel) ? m_factor : 1;
 
-    if (m_blockLevel) {
-        assert(0 && "Block level coarsening not supported yet.");
-        return;
-    }
-
-    coarseningBlock[0] = m_dimX ? m_factor : 1;
-    coarseningBlock[1] = m_dimY ? m_factor : 1;
-    coarseningBlock[2] = m_dimZ ? m_factor : 1;
+    coarseningBlock[0] = (m_dimX && !m_blockLevel) ? m_factor : 1;
+    coarseningBlock[1] = (m_dimY && !m_blockLevel) ? m_factor : 1;
+    coarseningBlock[2] = (m_dimZ && !m_blockLevel) ? m_factor : 1;
 
     IRBuilder<> builder(configCall);
     SmallVector<Value *, 12> args(configCall->arg_begin(),
@@ -515,6 +513,41 @@ void CUDACoarseningPass::insertCudaConfigureCallScaled(Module& M)
     builder.CreateAlignedStore(blockZ, sbZ, 8, false);
     builder.CreateAlignedStore(sharedMem, ssm, 8, false);
     builder.CreateAlignedStore(cudaStream, scs, 8, false);
+
+    // Scale grid X
+    Value *ptrGridX = builder.CreatePointerCast(sgXY, Type::getInt32PtrTy(ctx));
+    ptrGridX = builder.CreateInBoundsGEP(ptrGridX,
+                                         ConstantInt::get(builder.getInt64Ty(),
+                                                          0));
+    Value *valGridX = builder.CreateAlignedLoad(ptrGridX, 4);
+    Value *valScaledGridX = 
+        builder.CreateUDiv(valGridX,
+                           builder.CreateIntCast(scaleGridX,
+                                                 builder.getInt32Ty(),
+                                                 false));
+    builder.CreateAlignedStore(valScaledGridX, ptrGridX, 4, false);
+
+    // Scale grid Y
+    Value *ptrGridY = builder.CreatePointerCast(sgXY, Type::getInt32PtrTy(ctx));
+    ptrGridY = builder.CreateInBoundsGEP(ptrGridY,
+                                         ConstantInt::get(builder.getInt64Ty(),
+                                                          1));
+    Value *valGridY = builder.CreateAlignedLoad(ptrGridY, 4);
+    Value *valScaledGridY = 
+        builder.CreateUDiv(valGridY,
+                           builder.CreateIntCast(scaleGridY,
+                                                 builder.getInt32Ty(),
+                                                 false));
+    builder.CreateAlignedStore(valScaledGridY, ptrGridY, 4, false);
+
+    // Scale grid Z
+    Value *valGridZ = builder.CreateAlignedLoad(sgZ, 8);
+    Value *valScaledGridZ = 
+        builder.CreateUDiv(valGridZ,
+                           builder.CreateIntCast(scaleGridZ,
+                                                 builder.getInt32Ty(),
+                                                 false));
+    builder.CreateAlignedStore(valScaledGridZ, sgZ, 8, false);
 
     // Scale BLOCK X
     Value *ptrBlockX = builder.CreatePointerCast(sbXY, Type::getInt32PtrTy(ctx));

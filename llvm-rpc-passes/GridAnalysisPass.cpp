@@ -25,13 +25,13 @@ GridAnalysisPass::GridAnalysisPass()
 }
 
 // PUBLIC ACCESSORS
-InstVector GridAnalysisPass::getGridIDDependentInstructions() const
+InstVector GridAnalysisPass::getThreadIDDependentInstructions() const
 {
-    // Get all instructions that look at threadIdx or blockIdx
+    // Get all instructions that look at threadIdx
 
-    InstVector resultX = getGridIDDependentInstructions(0);
-    InstVector resultY = getGridIDDependentInstructions(1);
-    InstVector resultZ = getGridIDDependentInstructions(2);
+    InstVector resultX = getThreadIDDependentInstructions(0);
+    InstVector resultY = getThreadIDDependentInstructions(1);
+    InstVector resultZ = getThreadIDDependentInstructions(2);
 
     InstVector result;
     result.insert(result.end(), resultX.begin(), resultX.end());
@@ -41,9 +41,9 @@ InstVector GridAnalysisPass::getGridIDDependentInstructions() const
     return result;
 }
 
-InstVector GridAnalysisPass::getGridIDDependentInstructions(int direction) const
+InstVector GridAnalysisPass::getThreadIDDependentInstructions(int direction) const
 {
-    // Get all instructions that look at threadIdx or blockIdx
+    // Get all instructions that look at threadIdx
 
     InstVector result;
 
@@ -51,30 +51,101 @@ InstVector GridAnalysisPass::getGridIDDependentInstructions(int direction) const
     auto tidx = varInstructions.find(CUDA_THREAD_ID_VAR);
     assert(tidx != varInstructions.end());
 
-    auto bidx = varInstructions.find(CUDA_BLOCK_ID_VAR);
-    assert(bidx != varInstructions.end());
-
     result.insert(result.end(), tidx->second.begin(), tidx->second.end());
-    // TODO block Coarsening result.insert(result.end(), bidx->second.begin(), bidx->second.end());
+
+    return result;
+}
+
+InstVector GridAnalysisPass::getBlockSizeDependentInstructions() const
+{
+    // Get all instructions that look at blockDim
+
+    InstVector resultX = getBlockSizeDependentInstructions(0);
+    InstVector resultY = getBlockSizeDependentInstructions(1);
+    InstVector resultZ = getBlockSizeDependentInstructions(2);
+
+    InstVector result;
+    result.insert(result.end(), resultX.begin(), resultX.end());
+    result.insert(result.end(), resultY.begin(), resultY.end());
+    result.insert(result.end(), resultZ.begin(), resultZ.end());
+
+    return result;
+}
+
+InstVector GridAnalysisPass::getBlockSizeDependentInstructions(int direction) const
+{
+    // Get all instructions that look at blockDim
+
+    InstVector result;
+
+    const varInstructions_t& varInstructions = gridInstructions[direction];
+
+    auto instrs = varInstructions.find(CUDA_BLOCK_DIM_VAR);
+    assert(instrs != varInstructions.end());
+
+    result.insert(result.end(), instrs->second.begin(), instrs->second.end());
+
+    return result;
+}
+
+InstVector GridAnalysisPass::getBlockIDDependentInstructions() const
+{
+    // Get all instructions that look at blockDim
+
+    InstVector resultX = getBlockIDDependentInstructions(0);
+    InstVector resultY = getBlockIDDependentInstructions(1);
+    InstVector resultZ = getBlockIDDependentInstructions(2);
+
+    InstVector result;
+    result.insert(result.end(), resultX.begin(), resultX.end());
+    result.insert(result.end(), resultY.begin(), resultY.end());
+    result.insert(result.end(), resultZ.begin(), resultZ.end());
+
+    return result;
+}
+
+InstVector GridAnalysisPass::getBlockIDDependentInstructions(int direction) const
+{
+    // Get all instructions that look at blockIdx
+
+    InstVector result;
+
+    const varInstructions_t& varInstructions = gridInstructions[direction];
+    auto instrs = varInstructions.find(CUDA_BLOCK_ID_VAR);
+    assert(instrs != varInstructions.end());
+
+    result.insert(result.end(), instrs->second.begin(), instrs->second.end());
+
+    return result;
+}
+
+InstVector GridAnalysisPass::getGridSizeDependentInstructions() const
+{
+    // Get all instructions that look at gridDim
+
+    InstVector resultX = getGridSizeDependentInstructions(0);
+    InstVector resultY = getGridSizeDependentInstructions(1);
+    InstVector resultZ = getGridSizeDependentInstructions(2);
+
+    InstVector result;
+    result.insert(result.end(), resultX.begin(), resultX.end());
+    result.insert(result.end(), resultY.begin(), resultY.end());
+    result.insert(result.end(), resultZ.begin(), resultZ.end());
 
     return result;
 }
 
 InstVector GridAnalysisPass::getGridSizeDependentInstructions(int direction) const
 {
-    // Get all instructions that look at blockDim or gridDim
+    // Get all instructions that look at gridDim
 
     InstVector result;
 
     const varInstructions_t& varInstructions = gridInstructions[direction];
-    auto gridDim = varInstructions.find(CUDA_GRID_DIM_VAR);
-    assert(gridDim != varInstructions.end());
+    auto instrs = varInstructions.find(CUDA_GRID_DIM_VAR);
+    assert(instrs != varInstructions.end());
 
-    auto blockDim = varInstructions.find(CUDA_BLOCK_DIM_VAR);
-    assert(blockDim != varInstructions.end());
-
-    // TODO block Coarsening result.insert(result.end(), gridDim->second.begin(), gridDim->second.end());
-    result.insert(result.end(), blockDim->second.begin(), blockDim->second.end());
+    result.insert(result.end(), instrs->second.begin(), instrs->second.end());
 
     return result;
 }

@@ -21,6 +21,7 @@
 #include "DivergenceAnalysisPass.h"
 
 extern cl::opt<std::string> CLCoarseningDimension;
+extern cl::opt<std::string> CLCoarseningMode;
 
 using namespace llvm;
 
@@ -99,14 +100,19 @@ void DivergenceAnalysisPass::clear()
 
 void DivergenceAnalysisPass::analyse()
 {
-    // HACKZ HACKZ HACKZ
+    m_blockLevel = CLCoarseningMode == "block";
+
+    // TODO
     assert(CLCoarseningDimension.length() == 1);
+
     std::unordered_map<char, int> tmp;
     tmp['x'] = 0;
     tmp['y'] = 1;
     tmp['z'] = 2;
     InstVector seeds =
-        m_grid->getGridIDDependentInstructions(tmp[CLCoarseningDimension[0]]);
+        m_blockLevel
+        ? m_grid->getBlockIDDependentInstructions(tmp[CLCoarseningDimension[0]])
+        : m_grid->getThreadIDDependentInstructions(tmp[CLCoarseningDimension[0]]);
 
     InstSet worklist(seeds.begin(), seeds.end());
 
@@ -155,7 +161,10 @@ void DivergenceAnalysisPass::findOutermost(InstVector&   insts,
     }
 
     // Remove from result all the calls to builtin functions.
-    InstVector builtin = m_grid->getGridIDDependentInstructions();
+    InstVector builtin =
+        m_blockLevel
+        ? m_grid->getBlockIDDependentInstructions()
+        : m_grid->getThreadIDDependentInstructions();
     InstVector tmp;
 
     size_t oldSize = result.size();

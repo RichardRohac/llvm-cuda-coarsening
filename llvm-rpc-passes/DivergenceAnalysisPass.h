@@ -62,6 +62,8 @@ private:
     PostDominatorTree *m_postDomT;
     DominatorTree     *m_domT;
     GridAnalysisPass  *m_grid;
+
+    bool               m_blockLevel;
 };
 
 #endif
