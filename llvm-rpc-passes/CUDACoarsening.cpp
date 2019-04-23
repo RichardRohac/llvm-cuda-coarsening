@@ -166,6 +166,19 @@ bool CUDACoarseningPass::handleDeviceCode(Module& M)
 
             analyzeKernel(F);
             scaleKernelGrid();
+            coarsenKernel();
+
+            // Replace placeholders.
+            for (auto &mapIter : m_phMap) {
+                InstVector &phs = mapIter.second;
+                // Iteate over placeholder vector.
+                for (auto ph : phs) {
+                    Value *replacement = m_phReplacementMap[ph];
+                    if (replacement != nullptr && ph != replacement) {
+                        ph->replaceAllUsesWith(replacement);
+                    }
+                }
+            }
         }
     }
 
@@ -321,6 +334,8 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
 void CUDACoarseningPass::analyzeKernel(Function& F)
 {
     m_coarseningMap.clear();
+    m_phMap.clear();
+    m_phReplacementMap.clear();
 
     // Perform initial analysis.
     m_loopInfo = &getAnalysis<LoopInfoWrapperPass>(F).getLoopInfo();
@@ -502,13 +517,17 @@ void CUDACoarseningPass::insertCudaConfigureCallScaled(Module& M)
     builder.CreateAlignedStore(cudaStream, scs, 8, false);
 
     // Scale BLOCK X
-    Value *valBlockX = builder.CreateAlignedLoad(sbXY, 8);
+    Value *ptrBlockX = builder.CreatePointerCast(sbXY, Type::getInt32PtrTy(ctx));
+    ptrBlockX = builder.CreateInBoundsGEP(ptrBlockX,
+                                          ConstantInt::get(builder.getInt64Ty(),
+                                                           0));
+    Value *valBlockX = builder.CreateAlignedLoad(ptrBlockX, 4);
     Value *valScaledBlockX = 
         builder.CreateUDiv(valBlockX,
                            builder.CreateIntCast(scaleBlockX,
-                                                 builder.getInt64Ty(),
+                                                 builder.getInt32Ty(),
                                                  false));
-    builder.CreateAlignedStore(valScaledBlockX, sbXY, 8, false);
+    builder.CreateAlignedStore(valScaledBlockX, ptrBlockX, 4, false);
 
     // Scale BLOCK Y
     Value *ptrBlockY = builder.CreatePointerCast(sbXY, Type::getInt32PtrTy(ctx));

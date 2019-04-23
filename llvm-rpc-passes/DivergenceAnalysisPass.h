@@ -25,6 +25,12 @@ public:
     // CREATORS
     DivergenceAnalysisPass();
 
+    // ACCESSORS
+    RegionVector& getOutermostRegions();
+    InstVector& getOutermostInstructions();
+
+    bool isDivergent(Instruction *inst);
+
     // MANIPULATORS
     void getAnalysisUsage(AnalysisUsage& AU) const override;
     bool runOnFunction(Function& F) override;
@@ -36,15 +42,21 @@ private:
     // PRIVATE MANIPULATORS
     void clear();
     void analyse();
+    void findOutermost(InstVector&   insts,
+                       RegionVector& regions,
+                       InstVector&   result);
     void findDivergentBranches();
     void findRegions();
+    void findOutermostRegions();
 
     RegionVector cleanUpRegions(RegionVector& regions, const DominatorTree *dt);
 
     // DATA
     InstVector         m_divergent;
+    InstVector         m_outermostDivergent;
     InstVector         m_divergentBranches;
     RegionVector       m_regions;
+    RegionVector       m_outermostRegions;
 
     LoopInfo          *m_loopInfo;
     PostDominatorTree *m_postDomT;

@@ -44,6 +44,26 @@ class CUDACoarseningPass : public ModulePass {
     void scaleKernelGridIDs(int direction);
     void scaleGrid(BasicBlock *configBlock, CallInst *configCall);
 
+    void coarsenKernel();
+
+    void replicateInstruction(Instruction *inst);
+    void replicateRegion(DivergentRegion *region);
+    void replicateRegionClassic(DivergentRegion *region);
+
+    void replicateRegionImpl(DivergentRegion *region, CoarseningMap& aliveMap);
+
+    void initAliveMap(DivergentRegion *region, CoarseningMap& aliveMap);
+    void updateAliveMap(CoarseningMap& aliveMap, Map& regionMap);
+    void updatePlaceholdersWithAlive(CoarseningMap& aliveMap);
+
+    void applyCoarseningMap(DivergentRegion& region, unsigned int index);
+    void applyCoarseningMap(BasicBlock *block, unsigned int index);
+    void applyCoarseningMap(Instruction *inst, unsigned int index);
+    Instruction *getCoarsenedInstruction(Instruction *inst,
+                                         unsigned int coarseningIndex);
+
+    void updatePlaceholderMap(Instruction *inst, InstVector& coarsenedInsts);
+
     CallInst *amendConfiguration(Module& M, BasicBlock *configOKBlock);
 
     void insertCudaConfigureCallScaled(Module& M);
@@ -56,6 +76,8 @@ class CUDACoarseningPass : public ModulePass {
     GridAnalysisPass       *m_gridAnalysis;
 
     CoarseningMap           m_coarseningMap;
+    CoarseningMap           m_phMap;
+    Map                     m_phReplacementMap;
 
     Function               *m_cudaConfigureCallScaled;
 

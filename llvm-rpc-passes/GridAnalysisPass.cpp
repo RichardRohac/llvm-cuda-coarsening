@@ -25,6 +25,22 @@ GridAnalysisPass::GridAnalysisPass()
 }
 
 // PUBLIC ACCESSORS
+InstVector GridAnalysisPass::getGridIDDependentInstructions() const
+{
+    // Get all instructions that look at threadIdx or blockIdx
+
+    InstVector resultX = getGridIDDependentInstructions(0);
+    InstVector resultY = getGridIDDependentInstructions(1);
+    InstVector resultZ = getGridIDDependentInstructions(2);
+
+    InstVector result;
+    result.insert(result.end(), resultX.begin(), resultX.end());
+    result.insert(result.end(), resultY.begin(), resultY.end());
+    result.insert(result.end(), resultZ.begin(), resultZ.end());
+
+    return result;
+}
+
 InstVector GridAnalysisPass::getGridIDDependentInstructions(int direction) const
 {
     // Get all instructions that look at threadIdx or blockIdx

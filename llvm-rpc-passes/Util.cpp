@@ -7,6 +7,9 @@
 #include "llvm/Analysis/PostDominators.h"
 #include "llvm/Support/MutexGuard.h"
 
+#include "RegionBounds.h"
+#include "DivergentRegion.h"
+
 using namespace llvm;
 
 bool findOneNVVMAnnotation(const GlobalValue  *gv,
@@ -217,7 +220,8 @@ void Util::applyMapToPhiBlocks(PHINode *Phi, Map &map) {
     }
 }
 
-void Util::applyMap(InstVector &insts, Map &map, InstVector &result) {
+void Util::applyMap(InstVector &insts, Map &map, InstVector &result)
+{
     result.clear();
     result.reserve(insts.size());
 
@@ -231,7 +235,8 @@ void Util::applyMap(InstVector &insts, Map &map, InstVector &result) {
     }
 }
 
-void Util::replaceUses(Value *oldValue, Value *newValue) {
+void Util::replaceUses(Value *oldValue, Value *newValue)
+{
   std::vector<User *> users;
   std::copy(oldValue->user_begin(), oldValue->user_end(),
             std::back_inserter(users));
@@ -240,6 +245,58 @@ void Util::replaceUses(Value *oldValue, Value *newValue) {
     if (user != newValue)
       user->replaceUsesOfWith(oldValue, newValue);
   });
+}
+
+// Regions --------------------------------------------------------------------
+bool Util::isOutermost(Instruction *inst, RegionVector& regions)
+{
+  bool result = false;
+  for (RegionVector::const_iterator iter = regions.begin(),
+                                    iterEnd = regions.end();
+       iter != iterEnd; ++iter) {
+    DivergentRegion *region = *iter;
+    result |= contains(*region, inst);
+  }
+  return !result;
+}
+
+bool Util::isOutermost(DivergentRegion *region, RegionVector& regions)
+{
+  Instruction *inst = region->getHeader()->getTerminator();
+  bool result = false;
+  for (RegionVector::const_iterator iter = regions.begin(),
+                                    iterEnd = regions.end();
+       iter != iterEnd; ++iter) {
+    DivergentRegion *region = *iter;
+    result |= containsInternally(*region, inst);
+  }
+  return !result;
+}
+
+void Util::renameValueWithFactor(Value *value, StringRef oldName, unsigned int index)
+{
+    if (!oldName.empty()) {
+        value->setName(oldName + "..cf" + Twine(index + 2));
+    }
+}
+
+void Util::changeBlockTarget(BasicBlock   *block,
+                             BasicBlock   *newTarget,
+                             unsigned int  branchIndex)
+{
+    Instruction *terminator = block->getTerminator();
+    assert(terminator->getNumSuccessors() &&
+            "The target can be change only if it is unique");
+    terminator->setSuccessor(branchIndex, newTarget);
+}
+
+void Util::remapBlocksInPHIs(BasicBlock *block,
+                             BasicBlock *oldBlock,
+                             BasicBlock *newBlock)
+{
+    Map phiMap;
+    phiMap[oldBlock] = newBlock;
+    Util::applyMapToPHIs(block, phiMap);
 }
 
 // ============================================================================

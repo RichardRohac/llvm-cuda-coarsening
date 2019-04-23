@@ -33,6 +33,30 @@ DivergenceAnalysisPass::DivergenceAnalysisPass()
 {
 }
 
+// PUBLIC ACCESSORS
+RegionVector& DivergenceAnalysisPass::getOutermostRegions()
+{
+    // Use memoization.
+    if (m_outermostRegions.empty()) {
+        findOutermostRegions();
+    }
+    return m_outermostRegions;
+}
+
+InstVector& DivergenceAnalysisPass::getOutermostInstructions()
+{
+    // Use memoization.
+    if (m_outermostDivergent.empty()) {
+        findOutermost(m_divergent, m_regions, m_outermostDivergent);
+    }
+    return m_outermostDivergent;
+}
+
+bool DivergenceAnalysisPass::isDivergent(Instruction *inst)
+{
+  return isPresent(inst, m_divergent);
+}
+
 // PUBLIC MANIPULATORS
 void DivergenceAnalysisPass::getAnalysisUsage(AnalysisUsage& AU) const
 {
@@ -67,8 +91,10 @@ bool DivergenceAnalysisPass::runOnFunction(Function& F)
 void DivergenceAnalysisPass::clear()
 {
     m_divergent.clear();
+    m_outermostDivergent.clear();
     m_divergentBranches.clear();
     m_regions.clear();
+    m_outermostRegions.clear();
 }
 
 void DivergenceAnalysisPass::analyse()
@@ -113,6 +139,36 @@ void DivergenceAnalysisPass::analyse()
     }
 }
 
+void DivergenceAnalysisPass::findOutermost(InstVector&   insts,
+                                           RegionVector& regions,
+                                           InstVector&   result)
+{
+    // This is called only when the outermost instructions are acutally
+    // requested, ie. during coarsening. This is done to be sure that this
+    // instructions are computed after the extraction of divergent regions
+    // from the CFG.
+    result.clear();
+    for (auto inst : insts) {
+        if (Util::isOutermost(inst, regions)) {
+            result.push_back(inst);
+        }
+    }
+
+    // Remove from result all the calls to builtin functions.
+    InstVector builtin = m_grid->getGridIDDependentInstructions();
+    InstVector tmp;
+
+    size_t oldSize = result.size();
+
+    std::sort(result.begin(), result.end());
+    std::sort(builtin.begin(), builtin.end());
+    std::set_difference(result.begin(), result.end(), builtin.begin(),
+                        builtin.end(), std::back_inserter(tmp));
+    result.swap(tmp);
+
+    assert(result.size() <= oldSize && "Wrong set difference");
+}
+
 void DivergenceAnalysisPass::findDivergentBranches()
 {
     std::copy_if(m_divergent.begin(),
@@ -140,6 +196,16 @@ void DivergenceAnalysisPass::findRegions()
 
     // Remove redundant regions. The ones coming from loops.
     m_regions = cleanUpRegions(m_regions, m_domT);
+}
+
+void DivergenceAnalysisPass::findOutermostRegions()
+{
+    m_outermostRegions.clear();
+    for (auto region : m_regions) {
+        if (Util::isOutermost(region, m_regions)) {
+            m_outermostRegions.push_back(region);
+        }
+    }
 }
 
 RegionVector DivergenceAnalysisPass::cleanUpRegions(RegionVector&        regions,

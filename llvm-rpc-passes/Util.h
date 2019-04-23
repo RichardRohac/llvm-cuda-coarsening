@@ -28,6 +28,7 @@ namespace llvm {
     class BranchInst;
     class PHINode;
     class Value;
+    class StringRef;
 }
 
 class Util {
@@ -76,6 +77,22 @@ class Util {
 
     static void replaceUses(llvm::Value *oldValue, llvm::Value *newValue);
 
+    // Regions ---------------------------------------------------------------
+    static bool isOutermost(llvm::Instruction *inst, RegionVector& regions);
+    static bool isOutermost(DivergentRegion *region, RegionVector& regions);
+
+    static void renameValueWithFactor(llvm::Value     *value,
+                                      llvm::StringRef  oldName,
+                                      unsigned int     index);
+
+    static void changeBlockTarget(llvm::BasicBlock   *block,
+                                  llvm::BasicBlock   *newTarget,
+                                  unsigned int        branchIndex = 0);
+
+
+    static void remapBlocksInPHIs(llvm::BasicBlock *block,
+                                  llvm::BasicBlock *oldBlock,
+                                  llvm::BasicBlock *newBlock);
 };
 
 #endif // LLVM_LIB_TRANSFORMS_CUDA_COARSENING_UTIL_H

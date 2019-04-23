@@ -23,8 +23,9 @@ $LLVM_BIN_DIR/llvm-dis ./device.bc
 $LLVM_BIN_DIR/opt -load $LLVM_BUILD_DIR/lib/LLVMCUDACoarsening.so             \
                   -cuda-coarsening-pass                                       \
                   -coarsened-kernel transposeNaive                            \
-                  -coarsening-dimension y                                     \
-                  -coarsening-factor 2                                        \
+                  -coarsening-dimension x                                     \
+                  -coarsening-factor 4                                        \
+                  -coarsening-stride 2                                        \
                   -debug-pass=Structure < device.bc > device_coarsened.bc
 
 # Generate readable versions
@@ -61,8 +62,9 @@ $LLVM_BIN_DIR/clang-8 -cc1 -O3 -emit-llvm -triple x86_64-unknown-linux-gnu    \
 $LLVM_BIN_DIR/opt -load $LLVM_BUILD_DIR/lib/LLVMCUDACoarsening.so             \
                   -cuda-coarsening-pass                                       \
                   -coarsened-kernel transposeNaive                            \
-                  -coarsening-dimension y                                     \
-                  -coarsening-factor 2                                        \
+                  -coarsening-dimension x                                     \
+                  -coarsening-factor 4                                        \
+                  -coarsening-stride 2                                        \
                   -debug-pass=Structure < combined.ll > combined_coarsened.bc
 
 # Generate readable versions

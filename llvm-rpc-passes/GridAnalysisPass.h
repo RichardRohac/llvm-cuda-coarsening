@@ -18,6 +18,7 @@ public:
     GridAnalysisPass();
 
     // ACCESSORS
+    InstVector getGridIDDependentInstructions() const;
     InstVector getGridIDDependentInstructions(int direction) const;
     InstVector getGridSizeDependentInstructions(int direction) const;
 

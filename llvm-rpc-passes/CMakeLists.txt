@@ -19,6 +19,8 @@ add_llvm_library( LLVMCUDACoarsening MODULE BUILDTREE_ONLY
   RegionBounds.cpp
   DivergentRegion.cpp
   GridScaling.cpp
+  Coarsening.cpp
+  RegionCoarsening.cpp
 
   DEPENDS
   intrinsics_gen
