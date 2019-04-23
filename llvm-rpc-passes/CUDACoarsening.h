@@ -19,6 +19,7 @@ namespace llvm {
 }
 
 class DivergenceAnalysisPass;
+class GridAnalysisPass;
 
 class CUDACoarseningPass : public ModulePass {
   public:
@@ -38,6 +39,9 @@ class CUDACoarseningPass : public ModulePass {
     bool handleHostCode(Module& M);
     
     void analyzeKernel(Function& F);
+    void scaleKernelGrid();
+    void scaleKernelGridSizes(int direction);
+    void scaleKernelGridIDs(int direction);
     void scaleGrid(BasicBlock *configBlock, CallInst *configCall);
 
     CallInst *amendConfiguration(Module& M, BasicBlock *configOKBlock);
@@ -49,6 +53,9 @@ class CUDACoarseningPass : public ModulePass {
     PostDominatorTree      *m_postDomT;
     DominatorTree          *m_domT;
     DivergenceAnalysisPass *m_divergenceAnalysis;
+    GridAnalysisPass       *m_gridAnalysis;
+
+    CoarseningMap           m_coarseningMap;
 
     Function               *m_cudaConfigureCallScaled;
 

@@ -19,6 +19,7 @@ public:
 
     // ACCESSORS
     InstVector getGridIDDependentInstructions(int direction) const;
+    InstVector getGridSizeDependentInstructions(int direction) const;
 
     // MANIPULATORS
     void getAnalysisUsage(AnalysisUsage& AU) const override;

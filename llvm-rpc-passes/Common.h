@@ -9,6 +9,7 @@
 #include <numeric>
 #include <functional>
 #include <algorithm>
+#include <map>
 
 #include "llvm/IR/ValueMap.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
@@ -43,6 +44,8 @@ typedef std::vector<llvm::BranchInst *> BranchVector;
 typedef std::set<llvm::BranchInst *> BranchSet;
 
 typedef std::vector<DivergentRegion *> RegionVector;
+
+typedef std::unordered_map<llvm::Instruction *, InstVector> CoarseningMap;
 
 // ===========================================================================
 // HELPER FUNCTIONS

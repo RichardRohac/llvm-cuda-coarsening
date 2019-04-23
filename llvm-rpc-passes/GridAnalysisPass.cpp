@@ -39,7 +39,26 @@ InstVector GridAnalysisPass::getGridIDDependentInstructions(int direction) const
     assert(bidx != varInstructions.end());
 
     result.insert(result.end(), tidx->second.begin(), tidx->second.end());
-    result.insert(result.end(), bidx->second.begin(), bidx->second.end());
+    // TODO block Coarsening result.insert(result.end(), bidx->second.begin(), bidx->second.end());
+
+    return result;
+}
+
+InstVector GridAnalysisPass::getGridSizeDependentInstructions(int direction) const
+{
+    // Get all instructions that look at blockDim or gridDim
+
+    InstVector result;
+
+    const varInstructions_t& varInstructions = gridInstructions[direction];
+    auto gridDim = varInstructions.find(CUDA_GRID_DIM_VAR);
+    assert(gridDim != varInstructions.end());
+
+    auto blockDim = varInstructions.find(CUDA_BLOCK_DIM_VAR);
+    assert(blockDim != varInstructions.end());
+
+    // TODO block Coarsening result.insert(result.end(), gridDim->second.begin(), gridDim->second.end());
+    result.insert(result.end(), blockDim->second.begin(), blockDim->second.end());
 
     return result;
 }

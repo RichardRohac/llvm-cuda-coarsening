@@ -27,6 +27,7 @@ namespace llvm {
     class PostDominatorTree;
     class BranchInst;
     class PHINode;
+    class Value;
 }
 
 class Util {
@@ -72,6 +73,8 @@ class Util {
     static void applyMapToPhiBlocks(llvm::PHINode *Phi, Map& map);
     //void applyMap(llvm::Instruction *Inst, CoarseningMap &map, unsigned int CF);
     static void applyMap(InstVector& insts, Map& map, InstVector& result);
+
+    static void replaceUses(llvm::Value *oldValue, llvm::Value *newValue);
 
 };
 

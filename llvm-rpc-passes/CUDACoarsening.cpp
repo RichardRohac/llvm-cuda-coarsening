@@ -25,6 +25,7 @@
 #include "CUDACoarsening.h"
 #include "Util.h"
 #include "DivergenceAnalysisPass.h"
+#include "GridAnalysisPass.h"
 
 #include <cxxabi.h>
 
@@ -136,6 +137,7 @@ void CUDACoarseningPass::getAnalysisUsage(AnalysisUsage& AU) const
     AU.addRequired<DivergenceAnalysisPass>();
     AU.addRequired<PostDominatorTreeWrapperPass>();
     AU.addRequired<DominatorTreeWrapperPass>();
+    AU.addRequired<GridAnalysisPass>();
 }
 
 bool CUDACoarseningPass::handleDeviceCode(Module& M)
@@ -154,9 +156,16 @@ bool CUDACoarseningPass::handleDeviceCode(Module& M)
             foundKernel = true;
 
             std::string name = demangle(F.getName());
+            name = name.substr(0, name.find_first_of('('));
+
+            if (name != m_kernelName) {
+                continue;
+            }
+
             errs() << "--  INFO  -- Found CUDA kernel: " << name << "\n";
 
             analyzeKernel(F);
+            scaleKernelGrid();
         }
     }
 
@@ -311,11 +320,14 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
 
 void CUDACoarseningPass::analyzeKernel(Function& F)
 {
+    m_coarseningMap.clear();
+
     // Perform initial analysis.
     m_loopInfo = &getAnalysis<LoopInfoWrapperPass>(F).getLoopInfo();
     m_postDomT = &getAnalysis<PostDominatorTreeWrapperPass>(F).getPostDomTree();
     m_domT = &getAnalysis<DominatorTreeWrapperPass>(F).getDomTree();
     m_divergenceAnalysis = &getAnalysis<DivergenceAnalysisPass>(F);
+    m_gridAnalysis = &getAnalysis<GridAnalysisPass>(F);
 }
 
 void CUDACoarseningPass::scaleGrid(BasicBlock *configBlock,

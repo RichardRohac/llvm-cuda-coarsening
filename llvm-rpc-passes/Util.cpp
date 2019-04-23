@@ -231,6 +231,17 @@ void Util::applyMap(InstVector &insts, Map &map, InstVector &result) {
     }
 }
 
+void Util::replaceUses(Value *oldValue, Value *newValue) {
+  std::vector<User *> users;
+  std::copy(oldValue->user_begin(), oldValue->user_end(),
+            std::back_inserter(users));
+
+  std::for_each(users.begin(), users.end(), [oldValue, newValue](User *user) {
+    if (user != newValue)
+      user->replaceUsesOfWith(oldValue, newValue);
+  });
+}
+
 // ============================================================================
 // Function annotation helper functions, taken from NVPTX back-end
 // ============================================================================
