@@ -20,6 +20,18 @@ namespace llvm {
 class GridAnalysisPass;
 class DivergentRegion;
 
+class DivergenceAnchorPass : public FunctionPass {
+  public:
+    // CREATORS
+    DivergenceAnchorPass();
+
+    // MANIPULATORS
+    bool runOnFunction(Function& F) override;
+    
+    // DATA
+    static char ID;
+};
+
 class DivergenceAnalysisPass : public FunctionPass {
 public:
     // CREATORS
@@ -41,13 +53,15 @@ public:
 private:
     // PRIVATE MANIPULATORS
     void clear();
-    void analyse();
+    void analyse(Function& F);
     void findOutermost(InstVector&   insts,
                        RegionVector& regions,
                        InstVector&   result);
     void findDivergentBranches();
     void findRegions();
     void findOutermostRegions();
+
+    void findUsers(InstVector& seeds, InstVector *out, bool skipBranches);
 
     RegionVector cleanUpRegions(RegionVector& regions, const DominatorTree *dt);
 

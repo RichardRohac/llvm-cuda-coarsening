@@ -9,6 +9,7 @@
 #include "llvm/Pass.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/IRBuilder.h"
 
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/PostDominators.h"
@@ -24,6 +25,46 @@ extern cl::opt<std::string> CLCoarseningDimension;
 extern cl::opt<std::string> CLCoarseningMode;
 
 using namespace llvm;
+
+char DivergenceAnchorPass::ID = 0;
+
+DivergenceAnchorPass::DivergenceAnchorPass()
+: FunctionPass(ID)
+{
+}
+
+bool DivergenceAnchorPass::runOnFunction(Function& F)
+{
+    for (BasicBlock &B : F) {
+        if (B.getName().find("rpc-anchor_entry") != std::string::npos) {
+            return false;
+        }
+    }
+
+    BasicBlock *entry = &F.getEntryBlock();
+    entry->splitBasicBlock(&entry->front(), "..rpc-anchor_entry");
+
+    std::vector<BasicBlock*> toSplit;
+    for (BasicBlock &B : F) {
+        for (Instruction &I : B) {
+            if (isa<ReturnInst>(&I)) {
+               toSplit.push_back(&B);
+            }
+        }
+    }
+
+    for (BasicBlock *pB : toSplit) {
+        pB->splitBasicBlock(&pB->front(), "..rpc-anchor_end");
+    }
+
+    return true;
+}
+
+static RegisterPass<DivergenceAnchorPass> Y("cuda-divergence-anchor-pass",
+                                            "CUDA Divergence Anchor Pass",
+                                            false, // Only looks at CFG
+                                            false // Analysis pass
+                                            );
 
 // DATA
 char DivergenceAnalysisPass::ID = 0;
@@ -55,7 +96,7 @@ InstVector& DivergenceAnalysisPass::getOutermostInstructions()
 
 bool DivergenceAnalysisPass::isDivergent(Instruction *inst)
 {
-  return isPresent(inst, m_divergent);
+    return isPresent(inst, m_divergent);
 }
 
 // PUBLIC MANIPULATORS
@@ -66,6 +107,7 @@ void DivergenceAnalysisPass::getAnalysisUsage(AnalysisUsage& AU) const
     AU.addRequired<PostDominatorTreeWrapperPass>();
     AU.addRequired<DominatorTreeWrapperPass>();
     AU.addRequired<GridAnalysisPass>();
+    AU.addRequired<DivergenceAnchorPass>();
     AU.setPreservesAll();
 }
 
@@ -81,7 +123,7 @@ bool DivergenceAnalysisPass::runOnFunction(Function& F)
     m_domT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
     m_grid = &getAnalysis<GridAnalysisPass>();
 
-    analyse();
+    analyse(F);
     findDivergentBranches();
     findRegions();
 
@@ -98,7 +140,7 @@ void DivergenceAnalysisPass::clear()
     m_outermostRegions.clear();
 }
 
-void DivergenceAnalysisPass::analyse()
+void DivergenceAnalysisPass::analyse(Function& F)
 {
     m_blockLevel = CLCoarseningMode == "block";
 
@@ -114,35 +156,7 @@ void DivergenceAnalysisPass::analyse()
         ? m_grid->getBlockIDDependentInstructions(tmp[CLCoarseningDimension[0]])
         : m_grid->getThreadIDDependentInstructions(tmp[CLCoarseningDimension[0]]);
 
-    InstSet worklist(seeds.begin(), seeds.end());
-
-    while (!worklist.empty()) {
-        auto iter = worklist.begin();
-        Instruction *inst = *iter;
-        worklist.erase(iter);
-        m_divergent.push_back(inst);
-
-        InstSet users;
-
-        // Manage branches.
-        if (isa<BranchInst>(inst)) {
-            BasicBlock *block = Util::findImmediatePostDom(inst->getParent(),
-                                                           m_postDomT);
-            for (auto it = block->begin(); isa<PHINode>(it); ++it) {
-                users.insert(&*it);
-            }
-        }
-
-        Util::findUsesOf(inst, users);
-        // Add users of the current instruction to the work list.
-        for (InstSet::iterator iter = users.begin();
-             iter != users.end();
-             ++iter) {
-             if (!isPresent(*iter, m_divergent)) {
-                worklist.insert(*iter);
-            }
-        }
-    }
+    findUsers(seeds, &m_divergent, false);
 }
 
 void DivergenceAnalysisPass::findOutermost(InstVector&   insts,
@@ -213,6 +227,43 @@ void DivergenceAnalysisPass::findOutermostRegions()
     for (auto region : m_regions) {
         if (Util::isOutermost(region, m_regions)) {
             m_outermostRegions.push_back(region);
+        }
+    }
+}
+
+void DivergenceAnalysisPass::findUsers(InstVector&  seeds,
+                                       InstVector  *out,
+                                       bool         skipBranches)
+{
+    InstSet worklist(seeds.begin(), seeds.end());
+
+    while (!worklist.empty()) {
+        auto iter = worklist.begin();
+        Instruction *inst = *iter;
+        worklist.erase(iter);
+        out->push_back(inst);
+
+        InstSet users;
+
+        // Manage branches.
+        if (isa<BranchInst>(inst)) {
+            if (!skipBranches) {
+                BasicBlock *block = Util::findImmediatePostDom(inst->getParent(),
+                                                            m_postDomT);
+                for (auto it = block->begin(); isa<PHINode>(it); ++it) {
+                    users.insert(&*it);
+                }
+            }
+        }
+
+        Util::findUsesOf(inst, users, skipBranches);
+        // Add users of the current instruction to the work list.
+        for (InstSet::iterator iter = users.begin();
+             iter != users.end();
+             ++iter) {
+             if (!isPresent(*iter, *out)) {
+                worklist.insert(*iter);
+            }
         }
     }
 }
