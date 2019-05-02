@@ -5,7 +5,8 @@ LLVM_BIN_DIR=/DATA/LLVM/build_debug/bin
 CUDA_BIN_DIR=/opt/cuda-9.2/bin
 DEVICE_ARCH=sm_61
 DEVICE_COMPUTE_ARCH=compute_61
-STRIDE=2
+STRIDE=32
+FACTOR=4
 
 # -----------------------------------------------------------------------------
 # Manual method (using opt):
@@ -25,8 +26,8 @@ $LLVM_BIN_DIR/opt -load $LLVM_BUILD_DIR/lib/LLVMCUDACoarsening.so             \
                   -cuda-coarsening-pass                                       \
                   -coarsened-kernel reduceShfl                                \
                   -coarsening-dimension x                                     \
-                  -coarsening-factor 2                                        \
-                  -coarsening-stride 32                                       \
+                  -coarsening-factor $FACTOR                                  \
+                  -coarsening-stride $STRIDE                                  \
                   -coarsening-mode thread                                     \
                   -debug-pass=Structure < device.bc > device_coarsened.bc
 
@@ -64,7 +65,8 @@ $LLVM_BIN_DIR/opt -load $LLVM_BUILD_DIR/lib/LLVMCUDACoarsening.so             \
                   -cuda-coarsening-pass                                       \
                   -coarsened-kernel reduceShfl                                \
                   -coarsening-dimension x                                     \
-                  -coarsening-factor 2                                        \
+                  -coarsening-factor $FACTOR                                  \
+                  -coarsening-stride $STRIDE                                  \
                   -coarsening-mode thread                                     \
                   -debug-pass=Structure < combined.ll > combined_coarsened.bc
 

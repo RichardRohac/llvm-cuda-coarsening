@@ -168,7 +168,18 @@ CUDACoarseningPass::getCoarsenedInstruction(Instruction *ret, Instruction *inst,
   if (It != m_coarseningMap.end()) {
     InstVector &entry = It->second;
     Instruction *result = entry[coarseningIndex];
-    if (ret == result) {
+
+    bool skip = false;
+    for (Instruction * is : entry) {
+      if (is == ret) {
+        skip = true;
+        errs() << "Found SAME: ";
+        is->dump();
+        ret->dump();
+      }
+    }
+
+    if (ret == result || skip) {
         errs() << "Skipping, probable stride definition, would create loop!\n";
         return nullptr;
     }
