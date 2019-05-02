@@ -17,17 +17,24 @@
 #include "DivergenceAnalysisPass.h"
 #include "GridAnalysisPass.h"
 
+Instruction *getAddInstNSW(Value *firstValue, Value *secondValue) {
+    Instruction *add =
+        BinaryOperator::Create(Instruction::Add, firstValue, secondValue);
+    add->setName(firstValue->getName() + "..AddNSW");
+    add->setHasNoSignedWrap();
+    return add;
+}
+
+
 void CUDACoarseningPass::coarsenKernel()
 {
     RegionVector& regions = m_divergenceAnalysis->getOutermostRegions();
     InstVector& insts = m_divergenceAnalysis->getOutermostInstructions();
 
     // Replicate instructions.
-    std::for_each(insts.begin(),
-                  insts.end(),
-                  [this](Instruction *inst) {
-                      replicateInstruction(inst); 
-                  });
+    for(InstVector::iterator it = insts.begin(); it != insts.end(); ++it) {
+        replicateInstruction(*it);
+    }
 
     // Replicate regions.
     std::for_each(regions.begin(),
@@ -65,6 +72,7 @@ void CUDACoarseningPass::replicateInstruction(Instruction *inst)
         applyCoarseningMap(newInst, index);
         // Insert the new instruction.
         newInst->insertAfter(bookmark);
+
         bookmark = newInst;
         // Add the new instruction to the coarsening map.
         current.push_back(newInst);
@@ -87,23 +95,55 @@ void CUDACoarseningPass::applyCoarseningMap(BasicBlock *block,
 {
   for (auto iter = block->begin(), iterEnd = block->end();
        iter != iterEnd; ++iter) {
-    applyCoarseningMap(&*iter, index);
+    applyCoarseningMap(&(*iter), index);
   }
 }
 
-void CUDACoarseningPass::applyCoarseningMap(Instruction *inst,
-                                          unsigned int index)
+void CUDACoarseningPass::applyCoarseningMap(Instruction  *inst,
+                                            unsigned int  index)
 {
-  for (unsigned int opIndex = 0, opEnd = inst->getNumOperands();
-       opIndex != opEnd; ++opIndex) {
-    Instruction *operand = dyn_cast<Instruction>(inst->getOperand(opIndex));
-    if (operand == nullptr)
-      continue;
-    Instruction *newOp = getCoarsenedInstruction(operand, index);
-    if (newOp == nullptr)
-      continue;
-    inst->setOperand(opIndex, newOp);
-  }
+    if (m_coarseningMap.find(inst) != m_coarseningMap.end()) {
+        errs() << "Skipping initial def!\n";
+        return;
+    }
+
+    for (unsigned int i = 0; i < inst->getNumOperands(); ++i) {
+        if (!isa<Instruction>(inst->getOperand(i))) {
+            continue;
+        }
+
+        errs() << "Turned ";
+        inst->dump();
+
+        Instruction *pOP = cast<Instruction>(inst->getOperand(i));
+        Instruction *newOp = getCoarsenedInstruction(inst, pOP, index);
+        if (newOp == nullptr) {
+            continue;
+        }
+        inst->setOperand(i, newOp);
+                errs() << "into ";
+        inst->dump();
+    }
+
+ // for (unsigned int opIndex = 0, opEnd = inst->getNumOperands();
+  //     opIndex != opEnd; ++opIndex) {
+ //   Instruction *operand = dyn_cast<Instruction>(inst->getOperand(opIndex));
+  //  if (operand == nullptr) {
+  //    continue;
+   // }
+   // if (m_coarseningMap[operand].size() > 0) {
+  //    errs() << "Skipping as is def..\n";
+   //   continue;
+   // }
+    //errs() << "Operand $i: " << operand->getName() << "\n";
+
+ //   Instruction *newOp = getCoarsenedInstruction(operand, index);
+ //   if (newOp == nullptr) {
+  //    continue;
+ //   }
+
+  //  inst->setOperand(opIndex, newOp);
+ // }
 }
 
 void CUDACoarseningPass::updatePlaceholderMap(Instruction *inst,
@@ -121,19 +161,24 @@ void CUDACoarseningPass::updatePlaceholderMap(Instruction *inst,
 
 //------------------------------------------------------------------------------
 Instruction *
-CUDACoarseningPass::getCoarsenedInstruction(Instruction *inst,
+CUDACoarseningPass::getCoarsenedInstruction(Instruction *ret, Instruction *inst,
                                             unsigned int coarseningIndex) {
   CoarseningMap::iterator It = m_coarseningMap.find(inst);
   // The instruction is in the map.
   if (It != m_coarseningMap.end()) {
     InstVector &entry = It->second;
     Instruction *result = entry[coarseningIndex];
+    if (ret == result) {
+        errs() << "Skipping, probable stride definition, would create loop!\n";
+        return nullptr;
+    }
     return result;
   } else {
     // The instruction is divergent.
     if (m_divergenceAnalysis->isDivergent(inst)) {
       // Look in placeholder map.
       CoarseningMap::iterator phIt = m_phMap.find(inst);
+      
       Instruction *result = nullptr;
       if (phIt != m_phMap.end()) {
         // The instruction is in the placeholder map.

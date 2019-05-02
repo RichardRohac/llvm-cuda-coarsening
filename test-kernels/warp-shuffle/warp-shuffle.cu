@@ -1,5 +1,5 @@
 #include "common.h"
-#include <cuda_runtime.h>
+//#include <cuda_runtime.h>
 #include <stdio.h>
 
 /*
@@ -93,8 +93,8 @@ __global__ void reduceShfl (int *g_idata, int *g_odata, unsigned int n)
     int laneIdx = threadIdx.x % warpSize;
     int warpIdx = threadIdx.x / warpSize;
 
-    // blcok-wide warp reduce
-    int localSum = 0;//warpReduce(g_idata[idx]);
+    // block-wide warp reduce
+    int localSum = warpReduce(g_idata[idx]);
 
     // save warp sum to shared memory
     if (laneIdx == 0) smem[warpIdx] = localSum;
@@ -103,13 +103,13 @@ __global__ void reduceShfl (int *g_idata, int *g_odata, unsigned int n)
     __syncthreads();
 
     // last warp reduce
-   // if (threadIdx.x < warpSize) localSum = (threadIdx.x < SMEMDIM) ?
-    //    smem[laneIdx] : 0;
-//
-   // if (warpIdx == 0) localSum = 0;//warpReduce(localSum);
+    if (threadIdx.x < warpSize) localSum = (threadIdx.x < SMEMDIM) ?
+        smem[laneIdx] : 0;
+
+    if (warpIdx == 0) localSum = warpReduce(localSum);
 
     // write result for this block to global mem
-   // if (threadIdx.x == 0) g_odata[blockIdx.x] = localSum;
+    if (threadIdx.x == 0) g_odata[blockIdx.x] = localSum;
 }
 
 __global__ void reduceSmemShfl (int *g_idata, int *g_odata, unsigned int n)

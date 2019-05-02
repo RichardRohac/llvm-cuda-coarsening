@@ -24,9 +24,9 @@ $LLVM_BIN_DIR/opt -load $LLVM_BUILD_DIR/lib/LLVMCUDACoarsening.so             \
                   -cuda-coarsening-pass                                       \
                   -coarsened-kernel transposeNaive                            \
                   -coarsening-dimension x                                     \
-                  -coarsening-factor 2                                        \
-                  -coarsening-stride 1                                        \
-                  -coarsening-mode block                                      \
+                  -coarsening-factor 4                                        \
+                  -coarsening-stride 2                                        \
+                  -coarsening-mode thread                                      \
                   -debug-pass=Structure < device.bc > device_coarsened.bc
 
 # Generate readable versions
@@ -55,8 +55,7 @@ $LLVM_BIN_DIR/clang-8 -cc1 -O3 -emit-llvm -triple x86_64-unknown-linux-gnu    \
                       -mconstructor-aliases -munwind-tables -fuse-init-array  \
                       -target-cpu x86-64 -dwarf-column-info                   \
                       -debugger-tuning=gdb                                    \
-                      -resource-dir /DATA/LLVM/build_debug/lib/clang/8.0.1    \
-                      -internal-isystem /DATA/LLVM/build_debug/lib/clang/8.0.1/include/cuda_wrappers -internal-isystem /opt/cuda-9.2/include -include __clang_cuda_runtime_wrapper.h -I/opt/intel/composerxe/linux/ipp/include -I/opt/intel/composerxe/linux/mkl/include -ISUBSTITUTE_INSTALL_DIR_HERE/include -I/opt/intel/composerxe/linux/tbb/include -internal-isystem /usr/lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1 -internal-isystem /usr/lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1/x86_64-pc-linux-gnu -internal-isystem /usr/lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1/backward -internal-isystem /usr/lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1 -internal-isystem /usr/lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1/x86_64-pc-linux-gnu -internal-isystem /usr/lib64/gcc/x86_64-pc-linux-gnu/8.2.1/../../../../include/c++/8.2.1/backward -internal-isystem /usr/local/include -internal-isystem /DATA/LLVM/build_debug/lib/clang/8.0.1/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -internal-isystem /usr/local/include -internal-isystem /DATA/LLVM/build_debug/lib/clang/8.0.1/include -internal-externc-isystem /include -internal-externc-isystem /usr/include \
+                      -resource-dir /usr/lib/clang/8.0.0 -internal-isystem /usr/lib/clang/8.0.0/include/cuda_wrappers -internal-isystem /opt/cuda-9.2/include -include __clang_cuda_runtime_wrapper.h -I/opt/intel/composerxe/linux/ipp/include -I/opt/intel/composerxe/linux/mkl/include -ISUBSTITUTE_INSTALL_DIR_HERE/include -I/opt/intel/composerxe/linux/tbb/include -internal-isystem /usr/bin/../lib64/gcc/x86_64-pc-linux-gnu/8.3.0/../../../../include/c++/8.3.0 -internal-isystem /usr/bin/../lib64/gcc/x86_64-pc-linux-gnu/8.3.0/../../../../include/c++/8.3.0/x86_64-pc-linux-gnu -internal-isystem /usr/bin/../lib64/gcc/x86_64-pc-linux-gnu/8.3.0/../../../../include/c++/8.3.0/backward -internal-isystem /usr/bin/../lib64/gcc/x86_64-pc-linux-gnu/8.3.0/../../../../include/c++/8.3.0 -internal-isystem /usr/bin/../lib64/gcc/x86_64-pc-linux-gnu/8.3.0/../../../../include/c++/8.3.0/x86_64-pc-linux-gnu -internal-isystem /usr/bin/../lib64/gcc/x86_64-pc-linux-gnu/8.3.0/../../../../include/c++/8.3.0/backward -internal-isystem /usr/local/include -internal-isystem /usr/lib/clang/8.0.0/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/clang/8.0.0/include -internal-externc-isystem /include -internal-externc-isystem /usr/include \
                       -fdeprecated-macro -fdebug-compilation-dir /home/richard/CUDACoarsening/cuda-coarsening/test-kernels/matrix-transpose -ferror-limit 19 -fmessage-length 0 -fobjc-runtime=gcc -fcxx-exceptions -fexceptions -fdiagnostics-show-option -o combined.ll -x cuda ./matrix-transpose.cu -fcuda-include-gpubinary device.fatbin -faddrsig
 
 # Modify host kernel launch routines
@@ -64,9 +63,9 @@ $LLVM_BIN_DIR/opt -load $LLVM_BUILD_DIR/lib/LLVMCUDACoarsening.so             \
                   -cuda-coarsening-pass                                       \
                   -coarsened-kernel transposeNaive                            \
                   -coarsening-dimension x                                     \
-                  -coarsening-factor 2                                        \
-                  -coarsening-stride 1                                        \
-                  -coarsening-mode block                                      \
+                  -coarsening-factor 4                                        \
+                  -coarsening-stride 2                                        \
+                  -coarsening-mode thread                                      \
                   -debug-pass=Structure < combined.ll > combined_coarsened.bc
 
 # Generate readable versions

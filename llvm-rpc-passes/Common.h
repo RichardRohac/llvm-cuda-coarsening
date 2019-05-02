@@ -45,7 +45,7 @@ typedef std::set<llvm::BranchInst *> BranchSet;
 
 typedef std::vector<DivergentRegion *> RegionVector;
 
-typedef std::unordered_map<llvm::Instruction *, InstVector> CoarseningMap;
+typedef std::map<llvm::Instruction *, InstVector> CoarseningMap;
 
 // ===========================================================================
 // HELPER FUNCTIONS

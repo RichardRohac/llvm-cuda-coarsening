@@ -28,6 +28,8 @@ public:
     InstVector getGridSizeDependentInstructions() const;
     InstVector getGridSizeDependentInstructions(int direction) const;
 
+    InstVector getShuffleInstructions() const;
+
     // MANIPULATORS
     void getAnalysisUsage(AnalysisUsage& AU) const override;
     bool runOnFunction(Function& F) override;
@@ -42,14 +44,18 @@ private:
     // PRIVATE MANIPULATORS
     void init();
     void analyse(Function *pF);
-    void findInstructionsByName(std::string name, Function *pF);
+    void findInstructionsByVar(std::string var, Function *pF);
+    void findInstructionsByVar(std::string  var,
+                               Function    *pF,
+                               int          direction,
+                               InstVector  *out);
     void findInstructionsByName(std::string  name,
                                 Function    *pF,
-                                int          direction,
                                 InstVector  *out);
 
     // DATA
-    std::vector<varInstructions_t> gridInstructions; 
+    std::vector<varInstructions_t> gridInstructions;
+    InstVector shuffleInstructions;
 };
 
 #endif

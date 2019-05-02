@@ -332,24 +332,27 @@ DivergentRegion::const_iterator DivergentRegion::const_iterator::end() {
 // Non member functions.
 //------------------------------------------------------------------------------
 BasicBlock *getExit(DivergentRegion &region) {
-  Instruction *terminator = region.getExiting()->getTerminator();
-  assert(terminator->getNumSuccessors() == 1 &&
-         "Divergent region must have one successor only");
-  BasicBlock *exit = terminator->getSuccessor(0);
-  return exit;
+    Instruction *terminator = region.getExiting()->getTerminator();
+    assert(terminator->getNumSuccessors() == 1 &&
+            "Divergent region must have one successor only");
+    BasicBlock *exit = terminator->getSuccessor(0);
+    return exit;
 }
 
 //------------------------------------------------------------------------------
 BasicBlock *getPredecessor(DivergentRegion *region, LoopInfo *loopInfo) {
-  BasicBlock *header = region->getHeader();
-  BasicBlock *predecessor = header->getSinglePredecessor();
-  if (predecessor == nullptr) {
-    Loop *loop = loopInfo->getLoopFor(header);
-    predecessor = loop->getLoopPredecessor();
-  }
-  assert(predecessor != nullptr &&
-         "Region header does not have a single predecessor");
-  return predecessor;
+    BasicBlock *header = region->getHeader();
+    BasicBlock *predecessor = header->getSinglePredecessor();
+    if (predecessor == nullptr) {
+        Loop *loop = loopInfo->getLoopFor(header);
+        if (!loop) {
+            return nullptr;
+        }
+        predecessor = loop->getLoopPredecessor();
+    }
+    assert(predecessor != nullptr &&
+            "Region header does not have a single predecessor");
+    return predecessor;
 }
 
 // -----------------------------------------------------------------------------

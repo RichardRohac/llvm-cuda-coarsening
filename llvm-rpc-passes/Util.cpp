@@ -72,11 +72,14 @@ std::string Util::cudaVarToRegister(std::string var)
     }
 }
 
-void Util::findUsesOf(Instruction *inst, InstSet &result) {
+void Util::findUsesOf(Instruction *inst, InstSet &result, bool skipBranches) {
     for (auto userIter = inst->user_begin();
          userIter != inst->user_end();
          ++userIter) {
         if (Instruction *userInst = dyn_cast<Instruction>(*userIter)) {
+            if (skipBranches && isa<BranchInst>(userInst))
+                continue;
+
             result.insert(userInst);
         }
     }
@@ -155,7 +158,7 @@ void Util::cloneDominatorInfo(BasicBlock *BB, Map &map, DominatorTree *DT)
     assert(DT->getNode(BB) && "BasicBlock does not have dominator info");
     // Entry block is not expected here. Infinite loops are not to cloned.
     assert(DT->getNode(BB)->getIDom() &&
-            "BasicBlock does not have immediate dominator");
+           "BasicBlock does not have immediate dominator");
     BasicBlock *BBDom = DT->getNode(BB)->getIDom()->getBlock();
 
     // NewBB's dominator is either BB's dominator or BB's dominator's clone.

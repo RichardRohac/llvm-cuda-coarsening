@@ -63,7 +63,7 @@ class CUDACoarseningPass : public ModulePass {
     void applyCoarseningMap(DivergentRegion& region, unsigned int index);
     void applyCoarseningMap(BasicBlock *block, unsigned int index);
     void applyCoarseningMap(Instruction *inst, unsigned int index);
-    Instruction *getCoarsenedInstruction(Instruction *inst,
+    Instruction *getCoarsenedInstruction(Instruction *ret, Instruction *inst,
                                          unsigned int coarseningIndex);
 
     void updatePlaceholderMap(Instruction *inst, InstVector& coarsenedInsts);

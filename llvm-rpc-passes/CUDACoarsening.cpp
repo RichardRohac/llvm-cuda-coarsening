@@ -66,7 +66,7 @@ cl::opt<std::string> CLCoarseningDimension("coarsening-dimension",
                                            cl::desc("Coarsening dimension"));
 
 cl::opt<std::string> CLCoarseningMode("coarsening-mode",
-                                      cl::init("thread"),
+                                      cl::init("block"),
                                       cl::Hidden,
                                       cl::desc("Coarsening mode (thread/block)"));
 
@@ -137,6 +137,7 @@ bool CUDACoarseningPass::runOnModule(Module& M)
 
 void CUDACoarseningPass::getAnalysisUsage(AnalysisUsage& AU) const
 {
+    AU.addRequired<DivergenceAnchorPass>();
     AU.addRequired<LoopInfoWrapperPass>();
     AU.addRequired<DivergenceAnalysisPass>();
     AU.addRequired<PostDominatorTreeWrapperPass>();
@@ -169,7 +170,7 @@ bool CUDACoarseningPass::handleDeviceCode(Module& M)
             errs() << "--  INFO  -- Found CUDA kernel: " << name << "\n";
 
             if (m_dynamicLevel) {
-                //generateVersions(F);
+                generateVersions(F);
                 continue;
             }
 

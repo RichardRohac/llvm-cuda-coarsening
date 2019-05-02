@@ -19,6 +19,11 @@
 #define CUDA_BLOCK_DIM_REG     "ntid"
 #define CUDA_GRID_DIM_REG      "nctaid"
 
+#define CUDA_SHUFFLE_DOWN      "nvvm.shfl.down"
+#define CUDA_SHUFFLE_UP        "nvvm.shfl.up"
+#define CUDA_SHUFFLE_BFLY      "nvvm.shfl.bfly"
+#define CUDA_SHUFFLE_IDX       "nvvm.shfl.idx"
+
 namespace llvm {
     class Function;
     class Instruction;
@@ -36,7 +41,9 @@ class Util {
     static bool isKernelFunction(llvm::Function& F);
     static std::string directionToString(int direction);
     static std::string cudaVarToRegister(std::string var);
-    static void findUsesOf(llvm::Instruction *inst, InstSet &result);
+    static void findUsesOf(llvm::Instruction *inst,
+                           InstSet&           result,
+                           bool               skipBranches = false);
     static llvm::BasicBlock *findImmediatePostDom(
                                            llvm::BasicBlock              *block,
                                            const llvm::PostDominatorTree *pdt);

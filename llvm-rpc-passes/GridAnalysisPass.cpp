@@ -150,6 +150,11 @@ InstVector GridAnalysisPass::getGridSizeDependentInstructions(int direction) con
     return result;
 }
 
+InstVector GridAnalysisPass::getShuffleInstructions() const
+{
+    return shuffleInstructions;
+}
+
 // PUBLIC MANIPULATORS
 void GridAnalysisPass::getAnalysisUsage(AnalysisUsage& AU) const
 {
@@ -173,6 +178,7 @@ void GridAnalysisPass::init()
     // Clear data, as pass can run multiple times
     gridInstructions.clear();
     gridInstructions.reserve(CUDA_MAX_DIM);
+    shuffleInstructions.clear();
 
     for (unsigned int i = 0; i < CUDA_MAX_DIM; ++i) {
         gridInstructions.push_back(varInstructions_t());
@@ -185,25 +191,36 @@ void GridAnalysisPass::init()
 
 void GridAnalysisPass::analyse(Function *pF)
 {
-    findInstructionsByName(CUDA_THREAD_ID_VAR, pF);
-    findInstructionsByName(CUDA_BLOCK_ID_VAR, pF);
-    findInstructionsByName(CUDA_BLOCK_DIM_VAR, pF);
-    findInstructionsByName(CUDA_GRID_DIM_VAR, pF);
+    findInstructionsByVar(CUDA_THREAD_ID_VAR, pF);
+    findInstructionsByVar(CUDA_BLOCK_ID_VAR, pF);
+    findInstructionsByVar(CUDA_BLOCK_DIM_VAR, pF);
+    findInstructionsByVar(CUDA_GRID_DIM_VAR, pF);
+
+    std::string base = LLVM_PREFIX;
+    base.append(".");
+    findInstructionsByName(base + CUDA_SHUFFLE_DOWN + ".i32", pF, &shuffleInstructions);
+    findInstructionsByName(base + CUDA_SHUFFLE_DOWN + ".f32", pF, &shuffleInstructions);
+    findInstructionsByName(base + CUDA_SHUFFLE_UP + ".i32", pF, &shuffleInstructions);
+    findInstructionsByName(base + CUDA_SHUFFLE_UP + ".f32", pF, &shuffleInstructions);
+    findInstructionsByName(base + CUDA_SHUFFLE_IDX + ".i32", pF, &shuffleInstructions);
+    findInstructionsByName(base + CUDA_SHUFFLE_IDX + ".f32", pF, &shuffleInstructions);
+    findInstructionsByName(base + CUDA_SHUFFLE_BFLY + ".i32", pF, &shuffleInstructions);
+    findInstructionsByName(base + CUDA_SHUFFLE_BFLY + ".f32", pF, &shuffleInstructions);
 }
 
-void GridAnalysisPass::findInstructionsByName(std::string name, Function *pF)
+void GridAnalysisPass::findInstructionsByVar(std::string var, Function *pF)
 {
     for (unsigned int i = 0; i < CUDA_MAX_DIM; ++i) {
         varInstructions_t& varInstructions = gridInstructions[i];
 
-        findInstructionsByName(name, pF, i, &varInstructions[name]);
+        findInstructionsByVar(var, pF, i, &varInstructions[var]);
     }
 }
 
-void GridAnalysisPass::findInstructionsByName(std::string  name,
-                                              Function    *pF,
-                                              int          direction,
-                                              InstVector  *out)
+void GridAnalysisPass::findInstructionsByVar(std::string  var,
+                                             Function    *pF,
+                                             int          direction,
+                                             InstVector  *out)
 {
     // CUDA variables (like threadIdx) are accessed by invoking calls to read
     // special registers.
@@ -211,11 +228,20 @@ void GridAnalysisPass::findInstructionsByName(std::string  name,
     calleeName.append(".");
     calleeName.append(CUDA_READ_SPECIAL_REG);
     calleeName.append(".");
-    calleeName.append(Util::cudaVarToRegister(name));
-    calleeName.append(".");
-    calleeName.append(Util::directionToString(direction));
+    calleeName.append(Util::cudaVarToRegister(var));
+    if (direction != -1) {
+        calleeName.append(".");
+        calleeName.append(Util::directionToString(direction));
+    }
 
-    Function *pCalleeF = pF->getParent()->getFunction(calleeName);
+    findInstructionsByName(calleeName, pF, out);
+}
+
+void GridAnalysisPass::findInstructionsByName(std::string  name,
+                                              Function    *pF,
+                                              InstVector  *out)
+{
+    Function *pCalleeF = pF->getParent()->getFunction(name);
     if (!pCalleeF) {
         return;
     }
