@@ -226,16 +226,19 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
                         errs() << "--  INFO  -- Found cudaLaunch of " << kernel << "\n";
                         foundGrid = true;
 
+                        BasicBlock *configOKBlock = &B;
+
+                        #ifndef CUDA_USES_NEW_LAUNCH
                         // Call to cudaLaunch is preceded by "numArgs()" of
                         // blocks, where the very first one is referenced by
                         // the unconditional branch instruction that checks
                         // for valid configuration (call to cudaConfigureCall).
-                        BasicBlock *configOKBlock = &B;
                         for (unsigned int i = 0;
                              i < kernelF->arg_size();
                              ++i) {
                                  configOKBlock = configOKBlock->getPrevNode();
                         }
+                        #endif
 
                         // FIXED!
                         // Depending on the optimization level, we might be
@@ -280,59 +283,6 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
         m_cudaConfigureCallScaled->eraseFromParent();
     }
 
-     //   errs() << "Found invokation to: " << kernelInvokation->getCalledFunction()->getName() << "\n";
-
-        // Function consists of basic blocks, which in turn consist of
-        // instructions.
-        // for (BasicBlock& B : F) {
-        //     for (Instruction& I : B) {
-        //         Instruction *pI = &I;
-        //         if (CallInst *callInst = dyn_cast<CallInst>(pI)) {
-        //             Function *calledF = callInst->getCalledFunction();
-
-        //             if (calledF->getName() == CUDA_RUNTIME_CONFIGURECALL) {
-        //                 foundGrid = true;
-
-
-
-        //                 Instruction *resultCheck = callInst->getNextNode();
-        //                 assert(isa<ICmpInst>(resultCheck) &&
-        //                        "Result comparison instruction expected!");
-        //                 Instruction *branchI = resultCheck->getNextNode();
-        //                 assert(isa<BranchInst>(branchI) &&
-        //                        "Branch instruction expected!");
-        //                 BranchInst *branch = dyn_cast<BranchInst>(branchI);
-        //                 assert(branch->getNumOperands() == 3);
-
-        //                 Value *pathOK = branch->getOperand(1);
-        //                 assert(isa<BasicBlock>(pathOK) &&
-        //                        "Expected basic block!");
-                        
-        //                 bool foundKernelName = false;
-        //                 BasicBlock *blockOK = dyn_cast<BasicBlock>(pathOK);
-        //                 for(Instruction& curI : *blockOK) {
-        //                     if (isa<CallInst>(&curI)) {
-        //                         CallInst *pcsf = dyn_cast<CallInst>(&curI); 
-        //                         std::string kernel =
-        //                          demangle(pcsf->getCalledFunction()->getName());
-        //                         foundKernelName = true;
-
-        //                         // HACKZ HACKZ HACKZ HACKZ HACKZ HACKZ HACKZ
-        //                         kernel =
-        //                             kernel.substr(0, kernel.find_first_of('('));
-
-        //                         if (kernel == CLKernelName) {
-        //                             scaleGrid(&B, callInst, rpcScaleDim);
-        //                         }
-        //                     }
-        //                 }
-
-        //                 assert(foundKernelName && "Kernel name not found!");                      
-        //             }
-        //         }
-        //     }
-    //}
-
     return foundGrid;
 }
 
@@ -343,7 +293,6 @@ void CUDACoarseningPass::generateVersions(Function& F)
 
     for (auto factor : factors) {
         for (auto stride : strides) {
-            Module *M = F.getParent();
             llvm::ValueToValueMapTy vMap;
             Function *cloned = llvm::CloneFunction(&F, vMap);
             cloned->setName(namedKernelVersion(F.getName(), 1, factor, stride));
@@ -525,12 +474,12 @@ void CUDACoarseningPass::insertCudaConfigureCallScaled(Module& M)
     scaledArgs.push_back(Type::getInt8Ty(ctx));
     scaledArgs.push_back(Type::getInt8Ty(ctx));
 
-    Constant *scaled = M.getOrInsertFunction(
+    FunctionCallee scaled = M.getOrInsertFunction(
         "cudaConfigureCallScaled",
         FunctionType::get(original->getReturnType(), scaledArgs, false)
     );
 
-    ptrF = cast<Function>(scaled);
+    ptrF = cast<Function>(scaled.getCallee());
     ptrF->setCallingConv(original->getCallingConv());
 
     Function::arg_iterator argIt = ptrF->arg_begin();
@@ -563,8 +512,6 @@ void CUDACoarseningPass::insertCudaConfigureCallScaled(Module& M)
             CreateAllocaA(&builder, origFT->getParamType(4), nullptr, "ssm", 8);
     AllocaInst *scs =
             CreateAllocaA(&builder, origFT->getParamType(5), nullptr, "scs", 8);
-
-    AllocaInst *savedPtrY = CreateAllocaA(&builder, Type::getInt32PtrTy(ctx), nullptr, "", 8);
 
     builder.CreateAlignedStore(gridXY, sgXY, 8, false);
     builder.CreateAlignedStore(gridZ, sgZ, 8, false);

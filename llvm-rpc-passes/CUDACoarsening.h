@@ -84,6 +84,7 @@ class CUDACoarseningPass : public ModulePass {
     Map                     m_phReplacementMap;
 
     Function               *m_cudaConfigureCallScaled;
+
     Function               *m_readEnvConfig;
 
     // CL config

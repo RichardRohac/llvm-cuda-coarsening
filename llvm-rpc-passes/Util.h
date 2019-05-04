@@ -2,8 +2,21 @@
 #define LLVM_LIB_TRANSFORMS_CUDA_COARSENING_UTIL_H
 
 #define CUDA_TARGET_TRIPLE         "nvptx64-nvidia-cuda"
-#define CUDA_RUNTIME_CONFIGURECALL "cudaConfigureCall"
-#define CUDA_RUNTIME_LAUNCH        "cudaLaunch"
+
+// https://reviews.llvm.org/D57488
+// In CUDA 9.2+, new version of launching kernels was implemented.
+#define CUDA_USES_NEW_LAUNCH 1
+  #ifndef CUDA_USES_NEW_LAUNCH
+    #define CUDA_RUNTIME_CONFIGURECALL "cudaConfigureCall"
+  #else
+    #define CUDA_RUNTIME_CONFIGURECALL "__cudaPushCallConfiguration"
+  #endif
+
+  #ifndef CUDA_USES_NEW_LAUNCH
+    #define CUDA_RUNTIME_LAUNCH "cudaLaunch"
+  #else
+    #define CUDA_RUNTIME_LAUNCH "cudaLaunchKernel"
+  #endif
 
 #define CUDA_THREAD_ID_VAR  "threadIdx"
 #define CUDA_BLOCK_ID_VAR   "blockIdx"
