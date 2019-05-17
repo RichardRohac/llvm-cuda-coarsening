@@ -21,6 +21,7 @@ add_llvm_library( LLVMCUDACoarsening MODULE BUILDTREE_ONLY
   GridScaling.cpp
   Coarsening.cpp
   RegionCoarsening.cpp
+  BenefitAnalysisPass.cpp
 
   DEPENDS
   intrinsics_gen

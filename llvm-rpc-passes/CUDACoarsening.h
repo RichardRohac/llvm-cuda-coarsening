@@ -20,6 +20,7 @@ namespace llvm {
 
 class DivergenceAnalysisPass;
 class GridAnalysisPass;
+class BenefitAnalysisPass;
 
 class CUDACoarseningPass : public ModulePass {
   public:
@@ -38,7 +39,7 @@ class CUDACoarseningPass : public ModulePass {
     bool handleDeviceCode(Module& M);
     bool handleHostCode(Module& M);
 
-    void generateVersions(Function& F);
+    void generateVersions(Function& F, bool deviceCode);
     std::string namedKernelVersion(std::string kernel, int b, int t, int s);
     
     void analyzeKernel(Function& F);
@@ -71,6 +72,7 @@ class CUDACoarseningPass : public ModulePass {
     CallInst *amendConfiguration(Module& M, BasicBlock *configOKBlock);
 
     void insertCudaConfigureCallScaled(Module& M);
+    void insertCudaLaunchDynamic(Module& M);
 
     // DATA
     LoopInfo               *m_loopInfo;
@@ -78,12 +80,15 @@ class CUDACoarseningPass : public ModulePass {
     DominatorTree          *m_domT;
     DivergenceAnalysisPass *m_divergenceAnalysis;
     GridAnalysisPass       *m_gridAnalysis;
+    BenefitAnalysisPass    *m_benefitAnalysis;
 
     CoarseningMap           m_coarseningMap;
     CoarseningMap           m_phMap;
     Map                     m_phReplacementMap;
 
     Function               *m_cudaConfigureCallScaled;
+    Function               *m_cudaLaunchDynamic;
+    Function               *m_rpcRegisterFunction;
 
     Function               *m_readEnvConfig;
 

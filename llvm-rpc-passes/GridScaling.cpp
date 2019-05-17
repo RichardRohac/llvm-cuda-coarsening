@@ -90,17 +90,10 @@ void CUDACoarseningPass::scaleKernelGridIDs(int direction)
         modulo->setOperand(0, inst);
         div->setOperand(0, inst);
 
-        errs() << "Or. adding ";
-        inst->dump();
-        errs() << "\n";
-
         // Compute the remaining thread ids.
         m_coarseningMap.insert(
                       std::pair<Instruction *, InstVector>(inst, InstVector()));
 
-        errs() << "Or. adding ";
-        base->dump();
-        errs() << "\n";
         InstVector &current = m_coarseningMap[base]; // BUG this inserts diff. inst.
         current.reserve(m_factor - 1);
 

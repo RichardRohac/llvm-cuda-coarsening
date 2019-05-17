@@ -18,6 +18,9 @@
     #define CUDA_RUNTIME_LAUNCH "cudaLaunchKernel"
   #endif
 
+#define CUDA_HOST_SETUP     "__cuda_module_ctor"
+#define CUDA_REGISTER_FUNC  "__cudaRegisterFunction"
+
 #define CUDA_THREAD_ID_VAR  "threadIdx"
 #define CUDA_BLOCK_ID_VAR   "blockIdx"
 #define CUDA_BLOCK_DIM_VAR  "blockDim"

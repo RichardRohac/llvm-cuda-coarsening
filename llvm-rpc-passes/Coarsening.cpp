@@ -103,7 +103,6 @@ void CUDACoarseningPass::applyCoarseningMap(Instruction  *inst,
                                             unsigned int  index)
 {
     if (m_coarseningMap.find(inst) != m_coarseningMap.end()) {
-        errs() << "Skipping initial def!\n";
         return;
     }
 
@@ -112,17 +111,12 @@ void CUDACoarseningPass::applyCoarseningMap(Instruction  *inst,
             continue;
         }
 
-        errs() << "Turned ";
-        inst->dump();
-
         Instruction *pOP = cast<Instruction>(inst->getOperand(i));
         Instruction *newOp = getCoarsenedInstruction(inst, pOP, index);
         if (newOp == nullptr) {
             continue;
         }
         inst->setOperand(i, newOp);
-                errs() << "into ";
-        inst->dump();
     }
 
  // for (unsigned int opIndex = 0, opEnd = inst->getNumOperands();
@@ -173,14 +167,10 @@ CUDACoarseningPass::getCoarsenedInstruction(Instruction *ret, Instruction *inst,
     for (Instruction * is : entry) {
       if (is == ret) {
         skip = true;
-        errs() << "Found SAME: ";
-        is->dump();
-        ret->dump();
       }
     }
 
     if (ret == result || skip) {
-        errs() << "Skipping, probable stride definition, would create loop!\n";
         return nullptr;
     }
     return result;
