@@ -46,8 +46,8 @@ class CUDACoarseningPass : public ModulePass {
     
     void analyzeKernel(Function& F);
     void scaleKernelGrid();
-    void scaleKernelGridSizes(int direction);
-    void scaleKernelGridIDs(int direction);
+    void scaleKernelGridSizes(unsigned int dimension);
+    void scaleKernelGridIDs(unsigned int dimension);
     void scaleGrid(BasicBlock *configBlock, CallInst *configCall);
 
     void coarsenKernel();

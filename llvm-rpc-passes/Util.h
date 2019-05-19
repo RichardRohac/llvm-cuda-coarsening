@@ -55,8 +55,9 @@ namespace llvm {
 class Util {
   public:
     static std::string demangle(std::string mangledName);
+    static unsigned int numeralDimension(std::string strDim);
+    static std::string dimensionToString(unsigned int dimension);
     static bool isKernelFunction(llvm::Function& F);
-    static std::string directionToString(int direction);
     static std::string cudaVarToRegister(std::string var);
     static void findUsesOf(llvm::Instruction *inst,
                            InstSet&           result,

@@ -30,12 +30,12 @@ void CUDACoarseningPass::scaleKernelGrid()
     scaleKernelGridIDs(m_dimension);
 }
 
-void CUDACoarseningPass::scaleKernelGridSizes(int direction)
+void CUDACoarseningPass::scaleKernelGridSizes(unsigned int dimension)
 {
     InstVector sizeInsts = 
                 m_blockLevel
-                ? m_gridAnalysis->getGridSizeDependentInstructions(direction)
-                : m_gridAnalysis->getBlockSizeDependentInstructions(direction);
+                ? m_gridAnalysis->getGridSizeDependentInstructions(dimension)
+                : m_gridAnalysis->getBlockSizeDependentInstructions(dimension);
 
     for (InstVector::iterator iter = sizeInsts.begin();
          iter != sizeInsts.end();
@@ -49,15 +49,15 @@ void CUDACoarseningPass::scaleKernelGridSizes(int direction)
     }
 }
 
-void CUDACoarseningPass::scaleKernelGridIDs(int direction)
+void CUDACoarseningPass::scaleKernelGridIDs(unsigned int dimension)
 {
     // origTid = [newTid / st] * cf * st + newTid % st + subid * st
     unsigned int cfst = m_factor * m_stride;
 
     InstVector tids = 
                 m_blockLevel
-                ? m_gridAnalysis->getBlockIDDependentInstructions(direction)
-                : m_gridAnalysis->getThreadIDDependentInstructions(direction);
+                ? m_gridAnalysis->getBlockIDDependentInstructions(dimension)
+                : m_gridAnalysis->getThreadIDDependentInstructions(dimension);
     for (InstVector::iterator instIter = tids.begin();
         instIter != tids.end();
         ++instIter) {

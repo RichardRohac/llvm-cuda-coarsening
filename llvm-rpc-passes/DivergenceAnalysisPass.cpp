@@ -143,18 +143,12 @@ void DivergenceAnalysisPass::clear()
 void DivergenceAnalysisPass::analyse(Function& F)
 {
     m_blockLevel = CLCoarseningMode == "block";
+    m_dimension = Util::numeralDimension(CLCoarseningDimension);
 
-    // TODO
-    assert(CLCoarseningDimension.length() == 1);
-
-    std::unordered_map<char, int> tmp;
-    tmp['x'] = 0;
-    tmp['y'] = 1;
-    tmp['z'] = 2;
     InstVector seeds =
         m_blockLevel
-        ? m_grid->getBlockIDDependentInstructions(tmp[CLCoarseningDimension[0]])
-        : m_grid->getThreadIDDependentInstructions(tmp[CLCoarseningDimension[0]]);
+        ? m_grid->getBlockIDDependentInstructions(m_dimension)
+        : m_grid->getThreadIDDependentInstructions(m_dimension);
 
     findUsers(seeds, &m_divergent, false);
 }

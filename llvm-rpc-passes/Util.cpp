@@ -33,6 +33,28 @@ std::string Util::demangle(std::string mangledName)
     return (status == 0) ? result.get() : mangledName;
 }
 
+unsigned int Util::numeralDimension(std::string strDim)
+{
+    assert (strDim == "x" || strDim == "y" || strDim == "z");
+
+    static std::unordered_map<std::string, unsigned int> tmp = {{"x", 0},
+                                                                {"y", 1},
+                                                                {"z", 2}};
+
+    return tmp[strDim];
+}
+
+std::string Util::dimensionToString(unsigned int dimension)
+{
+    assert(dimension <= 2 && "dimensionToString(): Dimension out of bounds!");
+
+    static std::unordered_map<unsigned int, std::string> tmp = {{0, "x"},
+                                                                {1, "y"},
+                                                                {2, "z"}};
+
+    return tmp[dimension];
+}
+
 bool Util::isKernelFunction(llvm::Function& F)
 {
     unsigned int x = 0;
@@ -44,30 +66,6 @@ bool Util::isKernelFunction(llvm::Function& F)
     }
 
     return (x == 1);
-}
-
-std::string Util::directionToString(int direction)
-{
-    assert(direction >= 0 &&
-           direction <= 2 &&
-           "directionToString(): Direction out of bounds!");
-
-    std::string strDirection;
-    switch (direction) {
-        case 0:
-            strDirection = "x";
-            break;
-        
-        case 1:
-            strDirection = "y";
-            break;
-
-        case 2:
-            strDirection = "z";
-            break;
-    }
-
-    return strDirection;
 }
 
 std::string Util::cudaVarToRegister(std::string var)

@@ -78,6 +78,7 @@ private:
     GridAnalysisPass  *m_grid;
 
     bool               m_blockLevel;
+    unsigned int       m_dimension;
 };
 
 #endif

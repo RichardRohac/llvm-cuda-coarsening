@@ -19,14 +19,14 @@ public:
 
     // ACCESSORS
     InstVector getThreadIDDependentInstructions() const;
-    InstVector getThreadIDDependentInstructions(int direction) const;
+    InstVector getThreadIDDependentInstructions(unsigned int dimension) const;
     InstVector getBlockSizeDependentInstructions() const;
-    InstVector getBlockSizeDependentInstructions(int direction) const;
+    InstVector getBlockSizeDependentInstructions(unsigned int dimension) const;
 
     InstVector getBlockIDDependentInstructions() const;
-    InstVector getBlockIDDependentInstructions(int direction) const;
+    InstVector getBlockIDDependentInstructions(unsigned int dimension) const;
     InstVector getGridSizeDependentInstructions() const;
-    InstVector getGridSizeDependentInstructions(int direction) const;
+    InstVector getGridSizeDependentInstructions(unsigned int dimension) const;
 
     InstVector getShuffleInstructions() const;
 
@@ -45,10 +45,10 @@ private:
     void init();
     void analyse(Function *pF);
     void findInstructionsByVar(std::string var, Function *pF);
-    void findInstructionsByVar(std::string  var,
-                               Function    *pF,
-                               int          direction,
-                               InstVector  *out);
+    void findInstructionsByVar(std::string   var,
+                               Function     *pF,
+                               unsigned int  dimension,
+                               InstVector   *out);
     void findInstructionsByName(std::string  name,
                                 Function    *pF,
                                 InstVector  *out);

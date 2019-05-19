@@ -153,15 +153,7 @@ bool CUDACoarseningPass::parseConfig()
             << "(parameter: coarsening-dimension)\n";
     }
 
-    if (CLCoarseningDimension == "x") {
-        m_dimension = 0;
-    }
-    else if (CLCoarseningDimension == "y") {
-        m_dimension = 1;
-    }
-    else {
-        m_dimension = 2;
-    }
+    m_dimension = Util::numeralDimension(CLCoarseningDimension);
 
     errs() << "\nCUDA Coarsening Pass configuration:";
     errs() << " kernel: " << CLKernelName;

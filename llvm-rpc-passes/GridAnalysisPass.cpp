@@ -41,13 +41,14 @@ InstVector GridAnalysisPass::getThreadIDDependentInstructions() const
     return result;
 }
 
-InstVector GridAnalysisPass::getThreadIDDependentInstructions(int direction) const
+InstVector
+GridAnalysisPass::getThreadIDDependentInstructions(unsigned int dimension) const
 {
     // Get all instructions that look at threadIdx
 
     InstVector result;
 
-    const varInstructions_t& varInstructions = gridInstructions[direction];
+    const varInstructions_t& varInstructions = gridInstructions[dimension];
     auto tidx = varInstructions.find(CUDA_THREAD_ID_VAR);
     assert(tidx != varInstructions.end());
 
@@ -72,13 +73,14 @@ InstVector GridAnalysisPass::getBlockSizeDependentInstructions() const
     return result;
 }
 
-InstVector GridAnalysisPass::getBlockSizeDependentInstructions(int direction) const
+InstVector
+GridAnalysisPass::getBlockSizeDependentInstructions(unsigned int dimension) const
 {
     // Get all instructions that look at blockDim
 
     InstVector result;
 
-    const varInstructions_t& varInstructions = gridInstructions[direction];
+    const varInstructions_t& varInstructions = gridInstructions[dimension];
 
     auto instrs = varInstructions.find(CUDA_BLOCK_DIM_VAR);
     assert(instrs != varInstructions.end());
@@ -104,13 +106,14 @@ InstVector GridAnalysisPass::getBlockIDDependentInstructions() const
     return result;
 }
 
-InstVector GridAnalysisPass::getBlockIDDependentInstructions(int direction) const
+InstVector
+GridAnalysisPass::getBlockIDDependentInstructions(unsigned int dimension) const
 {
     // Get all instructions that look at blockIdx
 
     InstVector result;
 
-    const varInstructions_t& varInstructions = gridInstructions[direction];
+    const varInstructions_t& varInstructions = gridInstructions[dimension];
     auto instrs = varInstructions.find(CUDA_BLOCK_ID_VAR);
     assert(instrs != varInstructions.end());
 
@@ -135,13 +138,14 @@ InstVector GridAnalysisPass::getGridSizeDependentInstructions() const
     return result;
 }
 
-InstVector GridAnalysisPass::getGridSizeDependentInstructions(int direction) const
+InstVector
+GridAnalysisPass::getGridSizeDependentInstructions(unsigned int dimension) const
 {
     // Get all instructions that look at gridDim
 
     InstVector result;
 
-    const varInstructions_t& varInstructions = gridInstructions[direction];
+    const varInstructions_t& varInstructions = gridInstructions[dimension];
     auto instrs = varInstructions.find(CUDA_GRID_DIM_VAR);
     assert(instrs != varInstructions.end());
 
@@ -217,10 +221,10 @@ void GridAnalysisPass::findInstructionsByVar(std::string var, Function *pF)
     }
 }
 
-void GridAnalysisPass::findInstructionsByVar(std::string  var,
-                                             Function    *pF,
-                                             int          direction,
-                                             InstVector  *out)
+void GridAnalysisPass::findInstructionsByVar(std::string   var,
+                                             Function     *pF,
+                                             unsigned int  dimension,
+                                             InstVector   *out)
 {
     // CUDA variables (like threadIdx) are accessed by invoking calls to read
     // special registers.
@@ -229,10 +233,8 @@ void GridAnalysisPass::findInstructionsByVar(std::string  var,
     calleeName.append(CUDA_READ_SPECIAL_REG);
     calleeName.append(".");
     calleeName.append(Util::cudaVarToRegister(var));
-    if (direction != -1) {
-        calleeName.append(".");
-        calleeName.append(Util::directionToString(direction));
-    }
+    calleeName.append(".");
+    calleeName.append(Util::dimensionToString(dimension));
 
     findInstructionsByName(calleeName, pF, out);
 }
