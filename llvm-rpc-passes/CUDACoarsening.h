@@ -36,6 +36,8 @@ class CUDACoarseningPass : public ModulePass {
 
   private:
     // MODIFIERS
+    bool parseConfig();
+
     bool handleDeviceCode(Module& M);
     bool handleHostCode(Module& M);
 
@@ -97,10 +99,8 @@ class CUDACoarseningPass : public ModulePass {
     unsigned int            m_factor;
     unsigned int            m_stride;
     bool                    m_blockLevel;
-    bool                    m_dynamicLevel;
-    bool                    m_dimX;
-    bool                    m_dimY;
-    bool                    m_dimZ;
+    bool                    m_dynamicMode;
+    unsigned int            m_dimension;
 };
 
 #endif

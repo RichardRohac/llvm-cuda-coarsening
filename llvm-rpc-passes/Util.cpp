@@ -16,6 +16,23 @@ bool findOneNVVMAnnotation(const GlobalValue  *gv,
                            const std::string&  prop,
                            unsigned int&       retval);
 
+std::string Util::demangle(std::string mangledName)
+{
+    // Version for Linux (GNU C++)
+    // TODO Windows, Unix support
+
+    // https://gcc.gnu.org/onlinedocs/libstdc++/manual/ext_demangling.html
+
+    int status = -1;
+
+    std::unique_ptr<char, decltype(std::free) *> result{
+        abi::__cxa_demangle(mangledName.c_str(), NULL, NULL, &status),
+        std::free
+    };
+
+    return (status == 0) ? result.get() : mangledName;
+}
+
 bool Util::isKernelFunction(llvm::Function& F)
 {
     unsigned int x = 0;

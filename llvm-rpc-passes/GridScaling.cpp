@@ -26,20 +26,8 @@ Instruction *getModuloInst(Value *value, unsigned int modulo);
 
 void CUDACoarseningPass::scaleKernelGrid()
 {
-    if (m_dimX) {
-        scaleKernelGridSizes(0);
-        scaleKernelGridIDs(0);
-    }
-
-    if (m_dimY) {
-        scaleKernelGridSizes(1);
-        scaleKernelGridIDs(1);
-    }
-
-    if (m_dimZ) {
-        scaleKernelGridSizes(2);
-        scaleKernelGridIDs(2);
-    }
+    scaleKernelGridSizes(m_dimension);
+    scaleKernelGridIDs(m_dimension);
 }
 
 void CUDACoarseningPass::scaleKernelGridSizes(int direction)

@@ -10,6 +10,8 @@
 #include <functional>
 #include <algorithm>
 #include <map>
+#include <cxxabi.h>
+#include <stdlib.h>
 
 #include "llvm/IR/ValueMap.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"

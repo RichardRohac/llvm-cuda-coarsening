@@ -29,22 +29,6 @@
 #include "GridAnalysisPass.h"
 #include "BenefitAnalysisPass.h"
 
-#include <cxxabi.h>
-#include <stdlib.h>
-
-// https://gcc.gnu.org/onlinedocs/libstdc++/manual/ext_demangling.html
-inline std::string demangle(std::string mangledName)
-{
-    int status = -1;
-
-    std::unique_ptr<char, decltype(std::free) *> result{
-        abi::__cxa_demangle(mangledName.c_str(), NULL, NULL, &status),
-        std::free
-    };
-
-    return (status == 0) ? result.get() : mangledName;
-}
-
 // Command line parameters
 cl::opt<std::string> CLKernelName("coarsened-kernel",
                                   cl::init(""),
@@ -62,14 +46,15 @@ cl::opt<unsigned int> CLCoarseningStride("coarsening-stride",
                                          cl::desc("Coarsening stride"));
 
 cl::opt<std::string> CLCoarseningDimension("coarsening-dimension",
-                                           cl::init("y"),
+                                           cl::init("x"),
                                            cl::Hidden,
                                            cl::desc("Coarsening dimension"));
 
-cl::opt<std::string> CLCoarseningMode("coarsening-mode",
-                                      cl::init("block"),
-                                      cl::Hidden,
-                                      cl::desc("Coarsening mode (thread/block)"));
+cl::opt<std::string> CLCoarseningMode(
+                            "coarsening-mode",
+                            cl::init("block"),
+                            cl::Hidden,
+                            cl::desc("Coarsening mode (thread/block/dynamic)"));
 
 using namespace llvm;
 
@@ -84,26 +69,9 @@ CUDACoarseningPass::CUDACoarseningPass()
 
 bool CUDACoarseningPass::runOnModule(Module& M)
 {
-    // Parse command line configuration
-    m_kernelName = CLKernelName;
-    assert(m_kernelName != "");
-    assert((CLCoarseningMode == "block" ||
-           CLCoarseningMode == "thread" ||
-           CLCoarseningMode == "dynamic") &&
-           "Wrong mode specified!");
-    m_blockLevel = CLCoarseningMode == "block";
-    m_dynamicLevel = CLCoarseningMode == "dynamic";
-    m_factor = CLCoarseningFactor;
-    m_stride = CLCoarseningStride;
-    m_dimX = CLCoarseningDimension.find('x') != std::string::npos;
-    m_dimY = CLCoarseningDimension.find('y') != std::string::npos;
-    m_dimZ = CLCoarseningDimension.find('z') != std::string::npos;
-
-    errs() << "\nInvoked CUDA COARSENING PASS (MODULE LEVEL) "
-           << "on module: " << M.getName()
-           << " -- kernel: " << CLKernelName << " " << CLCoarseningFactor
-           << "x " << CLCoarseningMode << " mode" 
-           << " with stride " << CLCoarseningStride << "\n";
+    if (!parseConfig()) {
+        return false;
+    }
 
     bool result = false;
 
@@ -112,10 +80,10 @@ bool CUDACoarseningPass::runOnModule(Module& M)
         // Device code gets extended with coarsened versions of the kernels.
         // For example:
         // -----------------------------------------------------------------
-        // XYZ -> XYZ_1x_2x_<stride> XYZ_1x_4x_<stride> XYZ_1x_8x_<stride> ...
-        //        XYZ_2x_1x_1x
-        //        XYZ_4x_1x_1x
-        //        XYZ_8x_1x_1x
+        // XYZ -> XYZ_1_2_<stride> XYZ_1_4_<stride> XYZ_1_8_<stride> ...
+        //        XYZ_2_1_1
+        //        XYZ_4_1_1
+        //        XYZ_8_1_1
         //        ...
         // -----------------------------------------------------------------
         // Where the numbering in the kernel names is defined as follows:
@@ -131,6 +99,7 @@ bool CUDACoarseningPass::runOnModule(Module& M)
         // -----------------------------------------------------------------
         result = handleHostCode(M);
     }
+
     errs() << "--  INFO  -- End of CUDA coarsening pass!" << "\n\n";
 
     return result;
@@ -145,6 +114,66 @@ void CUDACoarseningPass::getAnalysisUsage(AnalysisUsage& AU) const
     AU.addRequired<DominatorTreeWrapperPass>();
     AU.addRequired<GridAnalysisPass>();
     AU.addRequired<BenefitAnalysisPass>();
+}
+
+bool CUDACoarseningPass::parseConfig()
+{
+    // Parse command line configuration
+    m_kernelName = CLKernelName;
+    if (m_kernelName.empty()) {
+        errs() << "CUDA Coarsening Pass Error: no kernel specified "
+               << "(parameter: coarsened-kernel)\n";
+        
+        return false;
+    }
+
+    m_dynamicMode = false;
+    m_blockLevel = false;
+    
+    if (CLCoarseningMode == "dynamic") {
+        m_dynamicMode = true;
+    }
+    else if (CLCoarseningMode == "block") {
+        m_blockLevel = true;
+    }
+    else if (CLCoarseningMode != "thread") {
+        errs() << "CUDA Coarsening Pass Error: wrong coarsening mode specified "
+               << "(parameter: coarsening-mode)\n";
+    }
+
+    if (!m_dynamicMode) {
+        m_factor = CLCoarseningFactor;
+        m_stride = CLCoarseningStride;
+    }
+
+    if (!(CLCoarseningDimension == "x" ||
+        CLCoarseningDimension == "y" ||
+        CLCoarseningDimension == "z" )) {
+        errs() << "CUDA Coarsening Pass Error: unknown dimension specified "
+            << "(parameter: coarsening-dimension)\n";
+    }
+
+    if (CLCoarseningDimension == "x") {
+        m_dimension = 0;
+    }
+    else if (CLCoarseningDimension == "y") {
+        m_dimension = 1;
+    }
+    else {
+        m_dimension = 2;
+    }
+
+    errs() << "\nCUDA Coarsening Pass configuration:";
+    errs() << " kernel: " << CLKernelName;
+    errs() << ", dimension: " << CLCoarseningDimension;
+    errs() << ", mode: " << CLCoarseningMode;
+    if (!m_dynamicMode) {
+        errs() << CLCoarseningFactor << "x";
+        errs() << ", (stride: " << CLCoarseningStride << ")";
+    }
+    errs() << "\n";
+
+    return true;
 }
 
 bool CUDACoarseningPass::handleDeviceCode(Module& M)
@@ -162,7 +191,7 @@ bool CUDACoarseningPass::handleDeviceCode(Module& M)
         if (Util::isKernelFunction(F) && !F.isDeclaration()) {
             foundKernel = true;
 
-            std::string name = demangle(F.getName());
+            std::string name = Util::demangle(F.getName());
             name = name.substr(0, name.find_first_of('('));
 
             if (name != m_kernelName) {
@@ -171,7 +200,7 @@ bool CUDACoarseningPass::handleDeviceCode(Module& M)
 
             errs() << "--  INFO  -- Found CUDA kernel: " << name << "\n";
 
-            if (m_dynamicLevel) {
+            if (m_dynamicMode) {
                 generateVersions(F, true);
                 continue;
             }
@@ -214,7 +243,7 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
                                          cast<Function>(castPtr->getOperand(0));
                         std::string kernel = kernelF->getName();
                         
-                        kernel = demangle(kernel);
+                        kernel = Util::demangle(kernel);
                         kernel = kernel.substr(0, kernel.find_first_of('('));
 
                         if (kernel != m_kernelName) {
@@ -224,7 +253,7 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
                         errs() << "--  INFO  -- Found cudaLaunch of " << kernel << "\n";
                         foundGrid = true;
 
-                        if (m_dynamicLevel) {
+                        if (m_dynamicMode) {
                             callInst->setCalledFunction(m_cudaLaunchDynamic);
                         }
 
@@ -245,7 +274,7 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
                         // FIXED!
                         // Depending on the optimization level, we might be
                         // in a _kernelname_() function call.
-                        std::string pn = demangle(
+                        std::string pn = Util::demangle(
                                          configOKBlock->getParent()->getName());
                         pn = pn.substr(0, pn.find_first_of('('));
 
@@ -277,9 +306,9 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
         }
     }
 
-    if (m_dynamicLevel) {
+    if (m_dynamicMode) {
         for (Function& F : M) {
-            std::string funcName = demangle(F.getName());
+            std::string funcName = Util::demangle(F.getName());
             funcName = funcName.substr(0, funcName.find_first_of('('));
             if (funcName == m_kernelName) {
                 generateVersions(F, false);
@@ -438,7 +467,7 @@ std::string CUDACoarseningPass::namedKernelVersion(std::string kernel,
     // TODO other mangling schemes
     // C code?
 
-    std::string demangled = demangle(kernel);
+    std::string demangled = Util::demangle(kernel);
     demangled = demangled.substr(0, demangled.find_first_of('('));
 
     std::string suffix = "_";
@@ -479,30 +508,30 @@ void CUDACoarseningPass::analyzeKernel(Function& F)
 void CUDACoarseningPass::scaleGrid(BasicBlock *configBlock,
                                    CallInst   *configCall)
 {
-    uint8_t coarseningGrid[CUDA_MAX_DIM];
-    uint8_t coarseningBlock[CUDA_MAX_DIM];
-
-    coarseningGrid[0] = (m_dimX && m_blockLevel) ? m_factor : 1;
-    coarseningGrid[1] = (m_dimY && m_blockLevel) ? m_factor : 1;
-    coarseningGrid[2] = (m_dimZ && m_blockLevel) ? m_factor : 1;
-
-    coarseningBlock[0] = (m_dimX && !m_blockLevel) ? m_factor : 1;
-    coarseningBlock[1] = (m_dimY && !m_blockLevel) ? m_factor : 1;
-    coarseningBlock[2] = (m_dimZ && !m_blockLevel) ? m_factor : 1;
-
     IRBuilder<> builder(configCall);
     SmallVector<Value *, 12> args(configCall->arg_begin(),
                                   configCall->arg_end());
 
-    // In dynamic mode, the function itself takes care of coarsening factor
-    // scaling.
-    if (!m_dynamicLevel) {
-        args.push_back(builder.getInt8(coarseningGrid[0])); // scale grid X
-        args.push_back(builder.getInt8(coarseningGrid[1])); // scale grid Y
-        args.push_back(builder.getInt8(coarseningGrid[2])); // scale grid Z
-        args.push_back(builder.getInt8(coarseningBlock[0])); // scale block X
-        args.push_back(builder.getInt8(coarseningBlock[1])); // scale block Y
-        args.push_back(builder.getInt8(coarseningBlock[2])); // scale block Z
+    // When running dynamic mode, the runtime takes care of
+    // coarsening factor scaling.
+    if (!m_dynamicMode) {
+        uint8_t scaleGrid[CUDA_MAX_DIM];
+        uint8_t scaleBlock[CUDA_MAX_DIM];
+
+        scaleGrid[0] = ((m_dimension == 0) && m_blockLevel) ? m_factor : 1;
+        scaleGrid[1] = ((m_dimension == 1) && m_blockLevel) ? m_factor : 1;
+        scaleGrid[2] = ((m_dimension == 2) && m_blockLevel) ? m_factor : 1;
+
+        scaleBlock[0] = ((m_dimension == 0) && !m_blockLevel) ? m_factor : 1;
+        scaleBlock[1] = ((m_dimension == 1) && !m_blockLevel) ? m_factor : 1;
+        scaleBlock[2] = ((m_dimension == 2) && !m_blockLevel) ? m_factor : 1;
+
+        args.push_back(builder.getInt8(scaleGrid[0])); // scale grid X
+        args.push_back(builder.getInt8(scaleGrid[1])); // scale grid Y
+        args.push_back(builder.getInt8(scaleGrid[2])); // scale grid Z
+        args.push_back(builder.getInt8(scaleBlock[0])); // scale block X
+        args.push_back(builder.getInt8(scaleBlock[1])); // scale block Y
+        args.push_back(builder.getInt8(scaleBlock[2])); // scale block Z
     }
 
     CallInst *newCall = builder.CreateCall(m_cudaConfigureCallScaled, args);
@@ -590,7 +619,7 @@ void CUDACoarseningPass::insertCudaConfigureCallScaled(Module& M)
 
     // In case of dynamic mode, we use configuration function provided
     // externally.
-    if (m_dynamicLevel) {
+    if (m_dynamicMode) {
         FunctionCallee scaled = M.getOrInsertFunction(
             "cudaConfigureCallScaled",
             Type::getInt32Ty(ctx),   // return
@@ -770,7 +799,7 @@ void CUDACoarseningPass::insertCudaLaunchDynamic(Module& M)
 
     Function *ptrF;
 
-    if (m_dynamicLevel) {
+    if (m_dynamicMode) {
         FunctionCallee dynLaunch = M.getOrInsertFunction(
             "cudaLaunchDynamic",
             origFT->getReturnType(),

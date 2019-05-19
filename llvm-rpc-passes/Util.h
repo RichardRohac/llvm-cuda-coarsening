@@ -54,6 +54,7 @@ namespace llvm {
 
 class Util {
   public:
+    static std::string demangle(std::string mangledName);
     static bool isKernelFunction(llvm::Function& F);
     static std::string directionToString(int direction);
     static std::string cudaVarToRegister(std::string var);
