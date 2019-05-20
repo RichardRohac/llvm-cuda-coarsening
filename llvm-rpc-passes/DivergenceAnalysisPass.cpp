@@ -22,7 +22,6 @@
 #include "DivergenceAnalysisPass.h"
 
 extern cl::opt<std::string> CLCoarseningDimension;
-extern cl::opt<std::string> CLCoarseningMode;
 
 using namespace llvm;
 
@@ -60,18 +59,18 @@ bool DivergenceAnchorPass::runOnFunction(Function& F)
     return true;
 }
 
-static RegisterPass<DivergenceAnchorPass> Y("cuda-divergence-anchor-pass",
+static RegisterPass<DivergenceAnchorPass> Z("cuda-divergence-anchor-pass",
                                             "CUDA Divergence Anchor Pass",
                                             false, // Only looks at CFG
                                             false // Analysis pass
                                             );
 
 // DATA
-char DivergenceAnalysisPass::ID = 0;
+char DivergenceAnalysisPassTL::ID = 0;
+char DivergenceAnalysisPassBL::ID = 0;
 
 // CREATORS
 DivergenceAnalysisPass::DivergenceAnalysisPass()
-: FunctionPass(ID) 
 {
 }
 
@@ -99,37 +98,6 @@ bool DivergenceAnalysisPass::isDivergent(Instruction *inst)
     return isPresent(inst, m_divergent);
 }
 
-// PUBLIC MANIPULATORS
-void DivergenceAnalysisPass::getAnalysisUsage(AnalysisUsage& AU) const
-{
-    AU.addRequired<LoopInfoWrapperPass>();
-    AU.addPreserved<LoopInfoWrapperPass>(); //! not in multi-dim?
-    AU.addRequired<PostDominatorTreeWrapperPass>();
-    AU.addRequired<DominatorTreeWrapperPass>();
-    AU.addRequired<GridAnalysisPass>();
-    AU.addRequired<DivergenceAnchorPass>();
-    AU.setPreservesAll();
-}
-
-bool DivergenceAnalysisPass::runOnFunction(Function& F)
-{
-    //errs() << "--  INFO  -- Divergence analysis invoked on: ";
-    //errs().write_escaped(F.getName()) << '\n';
-
-    clear();
-
-    m_loopInfo = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-    m_postDomT = &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
-    m_domT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
-    m_grid = &getAnalysis<GridAnalysisPass>();
-
-    analyse(F);
-    findDivergentBranches();
-    findRegions();
-
-    return false;
-}
-
 // PRIVATE MANIPULATORS
 void DivergenceAnalysisPass::clear()
 {
@@ -142,7 +110,6 @@ void DivergenceAnalysisPass::clear()
 
 void DivergenceAnalysisPass::analyse(Function& F)
 {
-    m_blockLevel = CLCoarseningMode == "block";
     m_dimension = Util::numeralDimension(CLCoarseningDimension);
 
     InstVector seeds =
@@ -296,8 +263,80 @@ RegionVector DivergenceAnalysisPass::cleanUpRegions(RegionVector&        regions
     return result;
 }
 
-static RegisterPass<DivergenceAnalysisPass> X("cuda-divergence-analysis-pass",
-                                              "CUDA Divergence Analysis Pass",
-                                              false, // Only looks at CFG
-                                              true // Analysis pass
-                                              );
+DivergenceAnalysisPassTL::DivergenceAnalysisPassTL()
+: FunctionPass(ID) 
+{
+}
+
+// PUBLIC MANIPULATORS
+void DivergenceAnalysisPassTL::getAnalysisUsage(AnalysisUsage& AU) const
+{
+    AU.addRequired<DivergenceAnchorPass>();
+    AU.addRequired<LoopInfoWrapperPass>();
+    AU.addRequired<PostDominatorTreeWrapperPass>();
+    AU.addRequired<DominatorTreeWrapperPass>();
+    AU.addRequired<GridAnalysisPass>();
+    AU.setPreservesAll();
+}
+
+bool DivergenceAnalysisPassTL::runOnFunction(Function& F)
+{
+    clear();
+
+    m_loopInfo = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+    m_postDomT = &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
+    m_domT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
+    m_grid = &getAnalysis<GridAnalysisPass>();
+    m_blockLevel = false;
+
+    analyse(F);
+    findDivergentBranches();
+    findRegions();
+
+    return false;
+}
+
+static RegisterPass<DivergenceAnalysisPassTL> X("cuda-divergence-analysis-pass-tl",
+                                                "CUDA Divergence Analysis Pass TL",
+                                                false, // Only looks at CFG
+                                                true // Analysis pass
+                                                );
+
+DivergenceAnalysisPassBL::DivergenceAnalysisPassBL()
+: FunctionPass(ID) 
+{
+}
+
+// PUBLIC MANIPULATORS
+void DivergenceAnalysisPassBL::getAnalysisUsage(AnalysisUsage& AU) const
+{
+    AU.addRequired<DivergenceAnchorPass>();
+    AU.addRequired<LoopInfoWrapperPass>();
+    AU.addRequired<PostDominatorTreeWrapperPass>();
+    AU.addRequired<DominatorTreeWrapperPass>();
+    AU.addRequired<GridAnalysisPass>();
+    AU.setPreservesAll();
+}
+
+bool DivergenceAnalysisPassBL::runOnFunction(Function& F)
+{
+    clear();
+
+    m_loopInfo = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+    m_postDomT = &getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
+    m_domT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
+    m_grid = &getAnalysis<GridAnalysisPass>();
+    m_blockLevel = true;
+
+    analyse(F);
+    findDivergentBranches();
+    findRegions();
+
+    return false;
+}
+
+static RegisterPass<DivergenceAnalysisPassBL> Y("cuda-divergence-analysis-pass-bl",
+                                                "CUDA Divergence Analysis Pass BL",
+                                                false, // Only looks at CFG
+                                                true // Analysis pass
+                                                );

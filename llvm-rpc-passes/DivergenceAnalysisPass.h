@@ -32,7 +32,7 @@ class DivergenceAnchorPass : public FunctionPass {
     static char ID;
 };
 
-class DivergenceAnalysisPass : public FunctionPass {
+class DivergenceAnalysisPass {
 public:
     // CREATORS
     DivergenceAnalysisPass();
@@ -43,14 +43,7 @@ public:
 
     bool isDivergent(Instruction *inst);
 
-    // MANIPULATORS
-    void getAnalysisUsage(AnalysisUsage& AU) const override;
-    bool runOnFunction(Function& F) override;
-
-    // DATA
-    static char ID;
-
-private:
+protected:
     // PRIVATE MANIPULATORS
     void clear();
     void analyse(Function& F);
@@ -79,6 +72,32 @@ private:
 
     bool               m_blockLevel;
     unsigned int       m_dimension;
+};
+
+class DivergenceAnalysisPassTL : public DivergenceAnalysisPass, public FunctionPass {
+  public:
+    // CREATORS
+    DivergenceAnalysisPassTL();
+
+    // MANIPULATORS
+    void getAnalysisUsage(AnalysisUsage& AU) const override;
+    bool runOnFunction(Function& F) override;
+
+    // DATA
+    static char ID;
+};
+
+class DivergenceAnalysisPassBL : public DivergenceAnalysisPass, public FunctionPass {
+  public:
+    // CREATORS
+    DivergenceAnalysisPassBL();
+
+    // MANIPULATORS
+    void getAnalysisUsage(AnalysisUsage& AU) const override;
+    bool runOnFunction(Function& F) override;
+
+    // DATA
+    static char ID;
 };
 
 #endif

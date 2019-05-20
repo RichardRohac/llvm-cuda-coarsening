@@ -64,7 +64,7 @@ void CUDACoarseningPass::scaleKernelGridIDs(unsigned int dimension)
         Instruction *inst = *instIter;
 
         // Compute base of new tid.
-        Instruction *div = getDivInst(inst, m_stride); 
+        Instruction *div = getDivInst(inst, m_stride);
         div->insertAfter(inst);
         Instruction *mul = getMulInst(div, cfst);
         mul->insertAfter(div);

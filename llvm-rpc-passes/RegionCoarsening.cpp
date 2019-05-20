@@ -119,12 +119,12 @@ void CUDACoarseningPass::replicateRegionImpl(DivergentRegion *region,
                         }
                       }
                     }
-                    errs() << "Adding mapping from ";
-                    I.dump();
-                    for (Instruction *k : tmp) {
-                      k->dump();
-                    }
-                    errs() << "====\n";
+                    //errs() << "Adding mapping from ";
+                    //I.dump();
+                    //for (Instruction *k : tmp) {
+                    //  k->dump();
+                    //}
+                   // errs() << "====\n";
                     toAdd.push_back(std::pair<Instruction*, InstVector>(&I, tmp));
                   }
                 }
@@ -135,9 +135,9 @@ void CUDACoarseningPass::replicateRegionImpl(DivergentRegion *region,
           m_coarseningMap.insert(ta);
         }
 
-        for (auto& sh : m_coarseningMap) {
-          sh.first->dump();
-        }
+        //for (auto& sh : m_coarseningMap) {
+        //  sh.first->dump();
+        //}
         
         applyCoarseningMap(*newRegion, index);
 
@@ -146,7 +146,7 @@ void CUDACoarseningPass::replicateRegionImpl(DivergentRegion *region,
         Util::changeBlockTarget(newRegion->getExiting(), bottomInsertionPoint);
 
         // Update the phi nodes of the newly inserted header.
-        //Util::remapBlocksInPHIs(newRegion->getHeader(), pred, topInsertionPoint);
+        Util::remapBlocksInPHIs(newRegion->getHeader(), pred, topInsertionPoint);
         // Update the phi nodes in the exit block.
        // Util::remapBlocksInPHIs(bottomInsertionPoint, topInsertionPoint,
        //                         newRegion->getExiting());

@@ -21,6 +21,7 @@
 
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/PostDominators.h"
+#include "llvm/Analysis/ScalarEvolution.h"
 
 #include "Common.h"
 #include "CUDACoarsening.h"
@@ -64,7 +65,6 @@ char CUDACoarseningPass::ID = 0;
 CUDACoarseningPass::CUDACoarseningPass()
 : ModulePass(ID)
 {
-
 }
 
 bool CUDACoarseningPass::runOnModule(Module& M)
@@ -109,10 +109,11 @@ void CUDACoarseningPass::getAnalysisUsage(AnalysisUsage& AU) const
 {
     AU.addRequired<DivergenceAnchorPass>();
     AU.addRequired<LoopInfoWrapperPass>();
-    AU.addRequired<DivergenceAnalysisPass>();
     AU.addRequired<PostDominatorTreeWrapperPass>();
     AU.addRequired<DominatorTreeWrapperPass>();
     AU.addRequired<GridAnalysisPass>();
+    AU.addRequired<DivergenceAnalysisPassTL>();
+    AU.addRequired<DivergenceAnalysisPassBL>();
     AU.addRequired<BenefitAnalysisPass>();
 }
 
@@ -192,12 +193,13 @@ bool CUDACoarseningPass::handleDeviceCode(Module& M)
 
             errs() << "--  INFO  -- Found CUDA kernel: " << name << "\n";
 
+            analyzeKernel(F);
+
             if (m_dynamicMode) {
                 generateVersions(F, true);
                 continue;
             }
 
-            analyzeKernel(F);
             scaleKernelGrid();
             coarsenKernel();
             replacePlaceholders();
@@ -332,10 +334,8 @@ void CUDACoarseningPass::generateVersions(Function& F, bool deviceCode)
     std::vector<unsigned int> strides = {1, 2, 4, 8, 16, 32, 64};
 
     CallInst *cudaRegFuncCall = nullptr;
-    LLVMContext& ctx = F.getContext();
 
     for (Function& xF : *F.getParent()) {
-      if (xF.getName() == CUDA_HOST_SETUP) {
         for (BasicBlock& B : xF) {
           for (Instruction& I : B) {
             Instruction *pI = &I;
@@ -353,8 +353,8 @@ void CUDACoarseningPass::generateVersions(Function& F, bool deviceCode)
             }
           }
         }
-      }
     }
+
     if(!deviceCode) {
       assert(cudaRegFuncCall != nullptr &&
         "Missing CUDA fatbinary registration routine!");
@@ -362,94 +362,115 @@ void CUDACoarseningPass::generateVersions(Function& F, bool deviceCode)
 
     for (auto factor : factors) {
         for (auto stride : strides) {
-            llvm::ValueToValueMapTy vMap;
-            Function *cloned = llvm::CloneFunction(&F, vMap);
-            std::string kn = namedKernelVersion(F.getName(), 1, factor, stride);
-            cloned->setName(kn);
+            generateVersion(F,
+                            deviceCode,
+                            factor,
+                            stride,
+                            false,
+                            cudaRegFuncCall);
+        }
+        generateVersion(F, deviceCode, factor, 1, true, cudaRegFuncCall);
+    }
+}
 
-            if (!deviceCode) {
-                GEPOperator *origGEP = 
-                          dyn_cast<GEPOperator>(cudaRegFuncCall->getOperand(2));
-                llvm::GlobalVariable *origGKN =
-                               dyn_cast<GlobalVariable>(origGEP->getOperand(0));
+void CUDACoarseningPass::generateVersion(Function&     F,
+                                         bool          deviceCode,
+                                         unsigned int  factor,
+                                         unsigned int  stride,
+                                         bool          blockMode,
+                                         CallInst     *cudaRegFuncCall)
+{
+    LLVMContext& ctx = F.getContext();
 
-                StringRef knWithNull(kn.c_str(), kn.size() + 1);
+    llvm::ValueToValueMapTy vMap;
+    Function *cloned = llvm::CloneFunction(&F, vMap);
+    std::string kn = namedKernelVersion(F.getName(),
+                                        blockMode ? factor : 1,
+                                        blockMode ? 1 : factor,
+                                        stride);
+    cloned->setName(kn);
 
-                llvm::Constant *ckn = 
+    if (!deviceCode) {
+        GEPOperator *origGEP = 
+                    dyn_cast<GEPOperator>(cudaRegFuncCall->getOperand(2));
+        llvm::GlobalVariable *origGKN =
+                        dyn_cast<GlobalVariable>(origGEP->getOperand(0));
+
+        StringRef knWithNull(kn.c_str(), kn.size() + 1);
+
+        llvm::Constant *ckn = 
                      llvm::ConstantDataArray::getString(ctx, knWithNull, false);
 
-                llvm::GlobalVariable *gkn = new llvm::GlobalVariable(
+        llvm::GlobalVariable *gkn = new llvm::GlobalVariable(
                                            *F.getParent(),
                                            ckn->getType(),
                                            true,
                                            llvm::GlobalVariable::PrivateLinkage,
                                            ckn);
 
-                gkn->setAlignment(origGKN->getAlignment());
-                gkn->setUnnamedAddr(origGKN->getUnnamedAddr());
+        gkn->setAlignment(origGKN->getAlignment());
+        gkn->setUnnamedAddr(origGKN->getUnnamedAddr());
 
-                CallInst *newRegCall =
+        CallInst *newRegCall =
                                    dyn_cast<CallInst>(cudaRegFuncCall->clone());
-                newRegCall->setCalledFunction(m_rpcRegisterFunction);
-                CastInst *ptrCast = CastInst::CreatePointerCast(
-                                            cloned,
-                                            Type::getInt8PtrTy(F.getContext()),
-                                            "");
-                ptrCast->insertAfter(cudaRegFuncCall);
+        newRegCall->setCalledFunction(m_rpcRegisterFunction);
+        CastInst *ptrCast = CastInst::CreatePointerCast(
+                                    cloned,
+                                    Type::getInt8PtrTy(F.getContext()),
+                                    "");
+        ptrCast->insertAfter(cudaRegFuncCall);
 
-                SmallVector<Value *, 8> idx = {
-                    ConstantInt::get(Type::getInt64Ty(ctx), 0),
-                    ConstantInt::get(Type::getInt64Ty(ctx), 0)
-                };
+        SmallVector<Value *, 8> idx = {
+            ConstantInt::get(Type::getInt64Ty(ctx), 0),
+            ConstantInt::get(Type::getInt64Ty(ctx), 0)
+        };
 
-                GetElementPtrInst *gep = GetElementPtrInst::CreateInBounds(
-                        gkn,
-                        idx,
-                        "",
-                        ptrCast);
+        GetElementPtrInst *gep = GetElementPtrInst::CreateInBounds(
+                gkn,
+                idx,
+                "",
+                ptrCast);
 
-                newRegCall->setOperand(1, ptrCast);
-                newRegCall->setOperand(2, gep);
-                newRegCall->setOperand(3, gep);
+        newRegCall->setOperand(1, ptrCast);
+        newRegCall->setOperand(2, gep);
+        newRegCall->setOperand(3, gep);
 
-                newRegCall->insertAfter(ptrCast);
+        newRegCall->insertAfter(ptrCast);
 
-                // Host code consists of stub functions only, no coarsening
-                // is required there.
-                continue;
-            }
-            
-            unsigned int savedFactor = m_factor;
-            unsigned int savedStride = m_stride;
-            bool savedBlockLevel = m_blockLevel;
-
-            m_factor = factor;
-            m_stride = stride;
-            m_blockLevel = false;
-
-            analyzeKernel(*cloned);
-            scaleKernelGrid();
-            coarsenKernel();
-            replacePlaceholders();
-
-            SmallVector<Metadata *, 3> operandsMD;
-            operandsMD.push_back(llvm::ValueAsMetadata::getConstant(cloned));
-            operandsMD.push_back(llvm::MDString::get(F.getContext(), "kernel"));
-            operandsMD.push_back(llvm::ValueAsMetadata::getConstant(
-                  llvm::ConstantInt::get(llvm::Type::getInt32Ty(F.getContext()),
-                                                                1)));
-
-            llvm::NamedMDNode *nvvmMetadataNode =
-                    F.getParent()->getOrInsertNamedMetadata("nvvm.annotations");
-            
-            nvvmMetadataNode->addOperand(MDTuple::get(F.getContext(),
-                                         operandsMD));
-
-            m_factor = savedFactor;
-            m_stride = savedStride;
-            m_blockLevel = savedBlockLevel;
-        }
+        // Host code consists of stub functions only, no coarsening
+        // is required there.
+        return;
     }
+    
+    unsigned int savedFactor = m_factor;
+    unsigned int savedStride = m_stride;
+    bool savedBlockLevel = m_blockLevel;
+
+    m_factor = factor;
+    m_stride = stride;
+    m_blockLevel = blockMode;
+
+    analyzeKernel(*cloned);
+    scaleKernelGrid();
+    coarsenKernel();
+    replacePlaceholders();
+
+    SmallVector<Metadata *, 3> operandsMD;
+    operandsMD.push_back(llvm::ValueAsMetadata::getConstant(cloned));
+    operandsMD.push_back(llvm::MDString::get(F.getContext(), "kernel"));
+    operandsMD.push_back(llvm::ValueAsMetadata::getConstant(
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(F.getContext()),
+                                                        1)));
+
+    llvm::NamedMDNode *nvvmMetadataNode =
+            F.getParent()->getOrInsertNamedMetadata("nvvm.annotations");
+    
+    nvvmMetadataNode->addOperand(MDTuple::get(F.getContext(),
+                                    operandsMD));
+
+    m_factor = savedFactor;
+    m_stride = savedStride;
+    m_blockLevel = savedBlockLevel;
 }
 
 std::string CUDACoarseningPass::namedKernelVersion(std::string kernel,
@@ -489,12 +510,13 @@ void CUDACoarseningPass::analyzeKernel(Function& F)
     m_phReplacementMap.clear();
 
     // Perform initial analysis.
+    //m_benefitAnalysis = &getAnalysis<BenefitAnalysisPass>(F);
     m_loopInfo = &getAnalysis<LoopInfoWrapperPass>(F).getLoopInfo();
     m_postDomT = &getAnalysis<PostDominatorTreeWrapperPass>(F).getPostDomTree();
     m_domT = &getAnalysis<DominatorTreeWrapperPass>(F).getDomTree();
-    m_divergenceAnalysis = &getAnalysis<DivergenceAnalysisPass>(F);
+    m_divergenceAnalysisTL = &getAnalysis<DivergenceAnalysisPassTL>(F);
+    m_divergenceAnalysisBL = &getAnalysis<DivergenceAnalysisPassBL>(F);
     m_gridAnalysis = &getAnalysis<GridAnalysisPass>(F);
-    m_benefitAnalysis = &getAnalysis<BenefitAnalysisPass>(F);
 }
 
 void CUDACoarseningPass::scaleGrid(BasicBlock *configBlock,

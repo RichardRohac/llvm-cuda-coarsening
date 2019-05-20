@@ -110,7 +110,6 @@ InstVector
 GridAnalysisPass::getBlockIDDependentInstructions(unsigned int dimension) const
 {
     // Get all instructions that look at blockIdx
-
     InstVector result;
 
     const varInstructions_t& varInstructions = gridInstructions[dimension];

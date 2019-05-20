@@ -28,8 +28,12 @@ Instruction *getAddInstNSW(Value *firstValue, Value *secondValue) {
 
 void CUDACoarseningPass::coarsenKernel()
 {
-    RegionVector& regions = m_divergenceAnalysis->getOutermostRegions();
-    InstVector& insts = m_divergenceAnalysis->getOutermostInstructions();
+    RegionVector& regions = m_blockLevel ?
+                            m_divergenceAnalysisBL->getOutermostRegions() :
+                            m_divergenceAnalysisTL->getOutermostRegions();
+    InstVector& insts = m_blockLevel ?
+                        m_divergenceAnalysisBL->getOutermostInstructions() :
+                        m_divergenceAnalysisTL->getOutermostInstructions();
 
     // Replicate instructions.
     for(InstVector::iterator it = insts.begin(); it != insts.end(); ++it) {
@@ -176,7 +180,8 @@ CUDACoarseningPass::getCoarsenedInstruction(Instruction *ret, Instruction *inst,
     return result;
   } else {
     // The instruction is divergent.
-    if (m_divergenceAnalysis->isDivergent(inst)) {
+    if (m_blockLevel ? m_divergenceAnalysisBL->isDivergent(inst) :
+                       m_divergenceAnalysisTL->isDivergent(inst)) {
       // Look in placeholder map.
       CoarseningMap::iterator phIt = m_phMap.find(inst);
       

@@ -12,6 +12,8 @@
 #include <map>
 #include <cxxabi.h>
 #include <stdlib.h>
+#include <iomanip>
+#include <sstream>
 
 #include "llvm/IR/ValueMap.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
