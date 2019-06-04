@@ -26,6 +26,7 @@ struct coarseningConfig {
     bool block;
     unsigned int factor;
     unsigned int stride;
+    unsigned int direction;
 };
 
 inline std::string demangle(std::string mangledName)
@@ -85,9 +86,6 @@ inline unsigned int errorFallback(const void  *ptr,
                                   size_t       sharedMem,
                                   void        *stream)
 {
-    //std::cout << "\nRPC_CONFIG undefined or has wrong format! \
-     //               Running uncoarsened version!\n";
-
     return cudaLaunchKernel(ptr, gridDim, blockDim, args, sharedMem, stream);
 }
 
@@ -101,7 +99,7 @@ inline bool parseConfig(char *str, coarseningConfig *result)
         tokens.push_back(token);
     }
 
-    if (tokens.size() != 4) {
+    if (tokens.size() != 5) {
         return false;
     }
 
@@ -110,30 +108,41 @@ inline bool parseConfig(char *str, coarseningConfig *result)
     }
 
     result->name = tokens[0];
-    result->block = tokens[1] == "block";
-    result->factor = atoi(tokens[2].c_str());
-    result->stride = atoi(tokens[3].c_str());
+    if (tokens[1] == "x") {
+        result->direction = 0;
+    }
+    else if (tokens[1] == "y") {
+        result->direction = 1;
+    }
+    else {
+        result->direction = 2;
+    }
+    result->block = tokens[2] == "block";
+    result->factor = atoi(tokens[3].c_str());
+    result->stride = atoi(tokens[4].c_str());
 
     return true;
 }
 
-extern "C"
-const nameKernelMap_t& rpcRegisterFunction(void       **fatCubinHandle,
-                                           const char  *hostFun,
-                                           char        *deviceFun,
-                                           const char  *deviceName,
-                                           int          thread_limit,
-                                           uint3       *tid,
-                                           uint3       *bid,
-                                           dim3        *bDim,
-                                           dim3        *gDim,
-                                           int         *wSize)
+nameKernelMap_t& getNameKernelMap()
 {
     static nameKernelMap_t nameKernelMap;
-    if (!fatCubinHandle) {
-        // TODO FUGLY HACK
-        return nameKernelMap;
-    }
+    return nameKernelMap;
+}
+
+extern "C"
+const void rpcRegisterFunction(void       **fatCubinHandle,
+                               const char  *hostFun,
+                               char        *deviceFun,
+                               const char  *deviceName,
+                               int          thread_limit,
+                               uint3       *tid,
+                               uint3       *bid,
+                               dim3        *bDim,
+                               dim3        *gDim,
+                               int         *wSize)
+{
+    nameKernelMap_t& nameKernelMap = getNameKernelMap();
 
     std::string name = demangle(deviceFun);
     name = name.substr(0, name.find_first_of('('));
@@ -150,8 +159,6 @@ const nameKernelMap_t& rpcRegisterFunction(void       **fatCubinHandle,
                            bDim,
                            gDim,
                            wSize);
-
-    return nameKernelMap;
 }
 
 extern "C" unsigned int cudaConfigureCallScaled(struct dim3  gridDim,
@@ -171,16 +178,22 @@ extern "C" unsigned int cudaConfigureCallScaled(struct dim3  gridDim,
         return errorFallback(gridDim, blockDim, sharedMem, stream);
     }
 
-   // printf("before %i %i %i - %i %i %i\n", gridDim.x, gridDim.y, gridDim.z,
-  //  blockDim.x, blockDim.y, blockDim.z);
+//  printf("before %i %i %i - %i %i %i\n", gridDim.x, gridDim.y, gridDim.z,
+//                                         blockDim.x, blockDim.y, blockDim.z);
 
     dim3 *scaledDim = config.block ? &gridDim : &blockDim;
-    scaledDim->x /= config.factor;
-   // scaledDim->y /= config.factor;
-   // scaledDim->z /= config.factor;
+    if (config.direction == 0) {
+        scaledDim->x /= config.factor;
+    }
+    else if (config.direction == 1) {
+        scaledDim->y /= config.factor;
+    }
+    else {
+        scaledDim->z /= config.factor;
+    }
 
-      //  printf("after %i %i %i - %i %i %i\n", gridDim.x, gridDim.y, gridDim.z,
-   // blockDim.x, blockDim.y, blockDim.z);
+//  printf("after %i %i %i - %i %i %i\n", gridDim.x, gridDim.y, gridDim.z,
+//                                        blockDim.x, blockDim.y, blockDim.z);
 
 #ifdef CUDA_USES_NEW_LAUNCH
     return __cudaPushCallConfiguration(gridDim, blockDim, sharedMem, stream);
@@ -215,20 +228,16 @@ extern "C" unsigned int cudaLaunchDynamic(const void  *ptr,
     nameScaled.append("_");
     nameScaled.append(std::to_string(config.stride));
 
-    //std::cout << "Looking for: " << nameScaled << "\n";
-
-    const nameKernelMap_t& map = rpcRegisterFunction(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    const nameKernelMap_t& map = getNameKernelMap();
     nameKernelMap_t::const_iterator it = map.find(nameScaled);
     if (it == map.end()) {
         return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
     }
 
-    //printf("Original %p new %p!!\n", ptr, it->second);
-
-    //printf("LAUNCH %i %i %i - %i %i %i\n", gridDim.x, gridDim.y, gridDim.z,
-    //blockDim.x, blockDim.y, blockDim.z);
-
-    unsigned int ret = cudaLaunchKernel(it->second, gridDim, blockDim, args, sharedMem, stream);
-    //std::cout << "Result " << ret << "\n";
-    return ret;
+    return cudaLaunchKernel(it->second,
+                            gridDim,
+                            blockDim,
+                            args,
+                            sharedMem,
+                            stream);
 }
