@@ -83,6 +83,7 @@ void CUDACoarseningPass::updatePlaceholdersWithAlive(CoarseningMap& aliveMap) {
 void CUDACoarseningPass::replicateRegionImpl(DivergentRegion *region,
                                              CoarseningMap&   aliveMap)
 {
+  errs() << "Replicating "; region->getHeader()->dump(); errs() << "\n";
     BasicBlock *pred = getPredecessor(region, m_loopInfo);
     BasicBlock *topInsertionPoint = pred; // region->getExiting()
     BasicBlock *bottomInsertionPoint = region->getHeader(); //getExit(*region);
@@ -146,10 +147,10 @@ void CUDACoarseningPass::replicateRegionImpl(DivergentRegion *region,
         Util::changeBlockTarget(newRegion->getExiting(), bottomInsertionPoint);
 
         // Update the phi nodes of the newly inserted header.
-        Util::remapBlocksInPHIs(newRegion->getHeader(), pred, topInsertionPoint);
+        //Util::remapBlocksInPHIs(newRegion->getHeader(), pred, topInsertionPoint);
         // Update the phi nodes in the exit block.
-       // Util::remapBlocksInPHIs(bottomInsertionPoint, topInsertionPoint,
-       //                         newRegion->getExiting());
+        //Util::remapBlocksInPHIs(bottomInsertionPoint, topInsertionPoint,
+        //                        newRegion->getExiting());
 
         //topInsertionPoint = newRegion->getHeader();
         bottomInsertionPoint = newRegion->getHeader(); //getExit(*newRegion);

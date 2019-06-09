@@ -55,6 +55,7 @@ namespace llvm {
 class Util {
   public:
     static std::string demangle(std::string mangledName);
+    static std::string nameFromDemangled(std::string demangledName);
     static unsigned int numeralDimension(std::string strDim);
     static std::string dimensionToString(unsigned int dimension);
     static bool isKernelFunction(llvm::Function& F);

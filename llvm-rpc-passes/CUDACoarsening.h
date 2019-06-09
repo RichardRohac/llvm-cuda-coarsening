@@ -12,6 +12,8 @@
 
 using namespace llvm;
 
+typedef std::unordered_map<Function *, bool> coarsenedKernelMap_t;
+
 namespace llvm {
     class LoopInfo;
     class PostDominatorTree;
@@ -47,15 +49,18 @@ class CUDACoarseningPass : public ModulePass {
                          bool          deviceCode,
                          unsigned int  factor,
                          unsigned int  stride,
+                         unsigned int  dimension,
                          bool          blockMode,
                          CallInst     *cudaRegFuncCall);
-    std::string namedKernelVersion(std::string kernel, int b, int t, int s);
+    std::string namedKernelVersion(std::string kernel, int d, int b, int t, int s);
     
     void analyzeKernel(Function& F);
     void scaleKernelGrid();
     void scaleKernelGridSizes(unsigned int dimension);
     void scaleKernelGridIDs(unsigned int dimension);
-    void scaleGrid(BasicBlock *configBlock, CallInst *configCall);
+    void scaleGrid(BasicBlock  *configBlock,
+                   CallInst    *configCall,
+                   std::string  kernelName);
 
     void coarsenKernel();
     void replacePlaceholders();
@@ -78,10 +83,23 @@ class CUDACoarseningPass : public ModulePass {
 
     void updatePlaceholderMap(Instruction *inst, InstVector& coarsenedInsts);
 
-    CallInst *amendConfiguration(Module& M, BasicBlock *configOKBlock);
+    CallInst *amendConfiguration(Module&     M,
+                                 BasicBlock *configOKBlock,
+                                 std::string kernelName);
 
     void insertCudaConfigureCallScaled(Module& M);
     void insertCudaLaunchDynamic(Module& M);
+
+    // PRIVATE ACCESSORS
+    bool shouldCoarsen(Function& F, bool hostCode = false) const;
+      // Returns true if and only if this function is to be coarsened according
+      // to the current pass configuration.
+
+    CallInst *cudaRegistrationCallForKernel(Module&     M,
+                                            std::string kernelName) const;
+      // Retrieves call to the CUDA runtime responsible for the fat binary
+      // registration of the kernel function specified by 'kernelName'.
+      // If no such registration call is found, function returns 'nullptr'.
 
     // DATA
     LoopInfo               *m_loopInfo;
@@ -101,6 +119,8 @@ class CUDACoarseningPass : public ModulePass {
     Function               *m_rpcRegisterFunction;
 
     Function               *m_readEnvConfig;
+
+    coarsenedKernelMap_t    m_coarsenedKernelMap;
 
     // CL config
     std::string             m_kernelName;

@@ -69,6 +69,8 @@ CUDACoarseningPass::CUDACoarseningPass()
 
 bool CUDACoarseningPass::runOnModule(Module& M)
 {
+    m_coarsenedKernelMap.clear();
+
     if (!parseConfig()) {
         return false;
     }
@@ -114,20 +116,12 @@ void CUDACoarseningPass::getAnalysisUsage(AnalysisUsage& AU) const
     AU.addRequired<GridAnalysisPass>();
     AU.addRequired<DivergenceAnalysisPassTL>();
     AU.addRequired<DivergenceAnalysisPassBL>();
-    AU.addRequired<BenefitAnalysisPass>();
+    //AU.addRequired<BenefitAnalysisPass>();
 }
 
 bool CUDACoarseningPass::parseConfig()
 {
     // Parse command line configuration
-    m_kernelName = CLKernelName;
-    if (m_kernelName.empty()) {
-        errs() << "CUDA Coarsening Pass Error: no kernel specified "
-               << "(parameter: coarsened-kernel)\n";
-        
-        return false;
-    }
-
     m_dynamicMode = false;
     m_blockLevel = false;
     
@@ -142,27 +136,35 @@ bool CUDACoarseningPass::parseConfig()
                << "(parameter: coarsening-mode)\n";
     }
 
-    if (!m_dynamicMode) {
-        m_factor = CLCoarseningFactor;
-        m_stride = CLCoarseningStride;
+    m_kernelName = CLKernelName;
+    if (m_kernelName.empty() && !m_dynamicMode) {
+        errs() << "CUDA Coarsening Pass Error: no kernel specified "
+               << "(parameter: coarsened-kernel)\n";
+        
+        return false;
     }
 
     if (!(CLCoarseningDimension == "x" ||
-        CLCoarseningDimension == "y" ||
-        CLCoarseningDimension == "z" )) {
+          CLCoarseningDimension == "y" ||
+          CLCoarseningDimension == "z" )) {
         errs() << "CUDA Coarsening Pass Error: unknown dimension specified "
-            << "(parameter: coarsening-dimension)\n";
+                << "(parameter: coarsening-dimension)\n";
     }
 
-    m_dimension = Util::numeralDimension(CLCoarseningDimension);
+    if (!m_dynamicMode) {
+        // In regular mode, configuration parameters need to be set.
+        m_factor = CLCoarseningFactor;
+        m_stride = CLCoarseningStride;
+        m_dimension = Util::numeralDimension(CLCoarseningDimension);
+    }
 
     errs() << "\nCUDA Coarsening Pass configuration:";
-    errs() << " kernel: " << CLKernelName;
-    errs() << ", dimension: " << CLCoarseningDimension;
-    errs() << ", mode: " << CLCoarseningMode;
+    errs() << " kernel: " << (CLKernelName.empty() ? "<all>" : m_kernelName);
+    errs() << ", mode: " << CLCoarseningMode << " ";
     if (!m_dynamicMode) {
         errs() << CLCoarseningFactor << "x";
-        errs() << ", (stride: " << CLCoarseningStride << ")";
+        errs() << ", (stride: " << CLCoarseningStride;
+        errs() << ", dimension: " << CLCoarseningDimension << ")";
     }
     errs() << "\n";
 
@@ -181,15 +183,11 @@ bool CUDACoarseningPass::handleDeviceCode(Module& M)
 
     bool foundKernel = false;
     for (auto& F : M) {
-        if (Util::isKernelFunction(F) && !F.isDeclaration()) {
-            foundKernel = true;
-
+        if (shouldCoarsen(F)) {
             std::string name = Util::demangle(F.getName());
-            name = name.substr(0, name.find_first_of('('));
+            name = Util::nameFromDemangled(name);
 
-            if (name != m_kernelName) {
-                continue;
-            }
+            foundKernel = true;
 
             errs() << "--  INFO  -- Found CUDA kernel: " << name << "\n";
 
@@ -228,6 +226,10 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
                 Instruction *pI = &I;
                 if (CallInst *callInst = dyn_cast<CallInst>(pI)) {
                     Function *calledF = callInst->getCalledFunction();
+                    if (!calledF) {
+                        // Indirect function invocation, should not matter.
+                        continue;
+                    }
 
                     if (calledF->getName() == CUDA_RUNTIME_LAUNCH) {
                         // cudaLaunch receives function pointer as an argument.
@@ -235,19 +237,21 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
                                         cast<Constant>(callInst->getOperand(0));
                         Function *kernelF =
                                          cast<Function>(castPtr->getOperand(0));
-                        std::string kernel = kernelF->getName();
-                        
-                        kernel = Util::demangle(kernel);
-                        kernel = kernel.substr(0, kernel.find_first_of('('));
 
-                        if (kernel != m_kernelName) {
+                        std::string kernel = Util::demangle(kernelF->getName());
+                        kernel = Util::nameFromDemangled(kernel);
+
+                        if (!shouldCoarsen(*kernelF, true)) {
                             continue;
                         }
 
-                        errs() << "--  INFO  -- Found cudaLaunch of " << kernel << "\n";
+                        errs() << "--  INFO  -- Found cudaLaunch of "
+                               << kernel << "\n";
                         foundGrid = true;
 
                         if (m_dynamicMode) {
+                            // In dynamic mode, replace the launch call with
+                            // the dispatcher function.
                             callInst->setCalledFunction(m_cudaLaunchDynamic);
                         }
 
@@ -267,10 +271,10 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
 
                         // FIXED!
                         // Depending on the optimization level, we might be
-                        // in a _kernelname_() function call.
-                        std::string pn = Util::demangle(
-                                         configOKBlock->getParent()->getName());
-                        pn = pn.substr(0, pn.find_first_of('('));
+                        // in a kernelname() function call.
+                        std::string pn = configOKBlock->getParent()->getName();
+                        pn = Util::demangle(pn);
+                        pn = Util::nameFromDemangled(pn);
 
                         if (pn == kernel) {
                             for (Function& xF : M) {
@@ -280,7 +284,7 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
                                         if (CallInst *callInst = dyn_cast<CallInst>(pxI)) {
                                             Function *calledxF = callInst->getCalledFunction();
                                             if (calledxF == configOKBlock->getParent()) {
-                                                CallInst *rem = amendConfiguration(M, callInst->getParent());
+                                                CallInst *rem = amendConfiguration(M, callInst->getParent(), kernelF->getName());
                                                 assert(rem != nullptr);
                                                 toRemove.push_back(rem);
                                             }
@@ -290,7 +294,7 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
                             }
                         }
                         else {
-                            CallInst *rem = amendConfiguration(M, configOKBlock);
+                            CallInst *rem = amendConfiguration(M, configOKBlock, kernelF->getName());
                             assert(rem != nullptr);
                             toRemove.push_back(rem);
                         }
@@ -302,11 +306,8 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
 
     if (m_dynamicMode) {
         for (Function& F : M) {
-            std::string funcName = Util::demangle(F.getName());
-            funcName = funcName.substr(0, funcName.find_first_of('('));
-            if (funcName == m_kernelName) {
+            if (shouldCoarsen(F, true)) {
                 generateVersions(F, false);
-                break;
             }
         }
     }
@@ -316,6 +317,8 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
     }
 
     if (!foundGrid) {
+        // If no kernel invocation was found, remove the previously inserted
+        // helper functions.
         if (m_cudaConfigureCallScaled != nullptr) {
             m_cudaConfigureCallScaled->eraseFromParent();
         }
@@ -331,45 +334,36 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
 void CUDACoarseningPass::generateVersions(Function& F, bool deviceCode)
 {
     std::vector<unsigned int> factors = {2, 4, 8, 16};
-    std::vector<unsigned int> strides = {1, 2, 4, 8, 16, 32, 64};
+    std::vector<unsigned int> strides = {1, 2, 32};
+    std::vector<unsigned int> dimensions = {0, 1};
 
-    CallInst *cudaRegFuncCall = nullptr;
-
-    for (Function& xF : *F.getParent()) {
-        for (BasicBlock& B : xF) {
-          for (Instruction& I : B) {
-            Instruction *pI = &I;
-            if (CallInst *callInst = dyn_cast<CallInst>(pI)) {
-              Function *calledF = callInst->getCalledFunction();
-
-              if (calledF->getName() == CUDA_REGISTER_FUNC) {
-                Constant *castPtr = cast<Constant>(callInst->getOperand(1));
-                Function *stubF = cast<Function>(castPtr->getOperand(0));
-                if (stubF->getName() == F.getName()) {
-                  cudaRegFuncCall = callInst;
-                  break;
-                }
-              }
-            }
-          }
+    CallInst *cudaRegFuncCall = cudaRegistrationCallForKernel(*F.getParent(),
+                                                              F.getName());
+    if(!deviceCode) {
+        if (!cudaRegFuncCall) {
+            return;
         }
     }
 
-    if(!deviceCode) {
-      assert(cudaRegFuncCall != nullptr &&
-        "Missing CUDA fatbinary registration routine!");
-    }
-
-    for (auto factor : factors) {
-        for (auto stride : strides) {
+    for (auto dimension : dimensions) {
+        for (auto factor : factors) {
+            for (auto stride : strides) {
+                generateVersion(F,
+                                deviceCode,
+                                factor,
+                                stride,
+                                dimension,
+                                false, // Thread-level.
+                                cudaRegFuncCall);
+            }
             generateVersion(F,
                             deviceCode,
                             factor,
-                            stride,
-                            false,
+                            1,         // Stride in block-level mode is ignored.
+                            dimension,
+                            true,      // Block-level.
                             cudaRegFuncCall);
         }
-        generateVersion(F, deviceCode, factor, 1, true, cudaRegFuncCall);
     }
 }
 
@@ -377,6 +371,7 @@ void CUDACoarseningPass::generateVersion(Function&     F,
                                          bool          deviceCode,
                                          unsigned int  factor,
                                          unsigned int  stride,
+                                         unsigned int  dimension,
                                          bool          blockMode,
                                          CallInst     *cudaRegFuncCall)
 {
@@ -385,10 +380,12 @@ void CUDACoarseningPass::generateVersion(Function&     F,
     llvm::ValueToValueMapTy vMap;
     Function *cloned = llvm::CloneFunction(&F, vMap);
     std::string kn = namedKernelVersion(F.getName(),
+                                        dimension,
                                         blockMode ? factor : 1,
                                         blockMode ? 1 : factor,
                                         stride);
     cloned->setName(kn);
+    m_coarsenedKernelMap[cloned] = true;
 
     if (!deviceCode) {
         GEPOperator *origGEP = 
@@ -411,9 +408,9 @@ void CUDACoarseningPass::generateVersion(Function&     F,
         gkn->setAlignment(origGKN->getAlignment());
         gkn->setUnnamedAddr(origGKN->getUnnamedAddr());
 
-        CallInst *newRegCall =
-                                   dyn_cast<CallInst>(cudaRegFuncCall->clone());
+        CallInst *newRegCall = dyn_cast<CallInst>(cudaRegFuncCall->clone());
         newRegCall->setCalledFunction(m_rpcRegisterFunction);
+
         CastInst *ptrCast = CastInst::CreatePointerCast(
                                     cloned,
                                     Type::getInt8PtrTy(F.getContext()),
@@ -431,9 +428,9 @@ void CUDACoarseningPass::generateVersion(Function&     F,
                 "",
                 ptrCast);
 
+        newRegCall->setOperand(3, newRegCall->getOperand(1));
         newRegCall->setOperand(1, ptrCast);
         newRegCall->setOperand(2, gep);
-        newRegCall->setOperand(3, gep);
 
         newRegCall->insertAfter(ptrCast);
 
@@ -444,11 +441,13 @@ void CUDACoarseningPass::generateVersion(Function&     F,
     
     unsigned int savedFactor = m_factor;
     unsigned int savedStride = m_stride;
+    unsigned int savedDimension = m_dimension;
     bool savedBlockLevel = m_blockLevel;
 
     m_factor = factor;
     m_stride = stride;
     m_blockLevel = blockMode;
+    m_dimension = dimension;
 
     analyzeKernel(*cloned);
     scaleKernelGrid();
@@ -471,12 +470,13 @@ void CUDACoarseningPass::generateVersion(Function&     F,
     m_factor = savedFactor;
     m_stride = savedStride;
     m_blockLevel = savedBlockLevel;
+    m_dimension = savedDimension;
 }
 
 std::string CUDACoarseningPass::namedKernelVersion(std::string kernel,
-                                                   int b, int t, int s)
+                                                   int d, int b, int t, int s)
 {
-    // Generate <kernel>_<blockfactor>_<threadfactor>_<stride> name
+    // Generate <kernel>_<dimension>_<blockfactor>_<threadfactor>_<stride> name
     // TODO other mangling schemes
     // C code?
 
@@ -484,6 +484,8 @@ std::string CUDACoarseningPass::namedKernelVersion(std::string kernel,
     demangled = demangled.substr(0, demangled.find_first_of('('));
 
     std::string suffix = "_";
+    suffix.append(std::to_string(d));
+    suffix.append("_");
     suffix.append(std::to_string(b));
     suffix.append("_");
     suffix.append(std::to_string(t));
@@ -520,7 +522,8 @@ void CUDACoarseningPass::analyzeKernel(Function& F)
 }
 
 void CUDACoarseningPass::scaleGrid(BasicBlock *configBlock,
-                                   CallInst   *configCall)
+                                   CallInst   *configCall,
+                                   std::string kernelName)
 {
     IRBuilder<> builder(configCall);
     SmallVector<Value *, 12> args(configCall->arg_begin(),
@@ -547,6 +550,26 @@ void CUDACoarseningPass::scaleGrid(BasicBlock *configBlock,
         args.push_back(builder.getInt8(scaleBlock[1])); // scale block Y
         args.push_back(builder.getInt8(scaleBlock[2])); // scale block Z
     }
+    else {
+        llvm::CallInst *regFunc = cudaRegistrationCallForKernel(
+                             *configCall->getParent()->getParent()->getParent(),
+                             kernelName);
+        GEPOperator *origGEP = dyn_cast<GEPOperator>(regFunc->getOperand(2));
+        llvm::GlobalVariable *origGKN = dyn_cast<GlobalVariable>(
+                                                        origGEP->getOperand(0));
+
+        SmallVector<Value *, 8> idx = {
+            ConstantInt::get(Type::getInt64Ty(configCall->getContext()), 0),
+            ConstantInt::get(Type::getInt64Ty(configCall->getContext()), 0)
+        };
+
+        GetElementPtrInst *gep = GetElementPtrInst::CreateInBounds(origGKN,
+                                                                   idx,
+                                                                   "",
+                                                                   configCall);
+
+        args.insert(args.begin(), gep);
+    }
 
     CallInst *newCall = builder.CreateCall(m_cudaConfigureCallScaled, args);
     newCall->setCallingConv(m_cudaConfigureCallScaled->getCallingConv());
@@ -556,7 +579,8 @@ void CUDACoarseningPass::scaleGrid(BasicBlock *configBlock,
 }
 
 CallInst *CUDACoarseningPass::amendConfiguration(Module&     M,
-                                                 BasicBlock *configOKBlock)
+                                                 BasicBlock *configOKBlock,
+                                                 std::string kernelName)
 {
     CallInst *ret = nullptr;
 
@@ -603,9 +627,13 @@ CallInst *CUDACoarseningPass::amendConfiguration(Module&     M,
         Instruction *pI = &I;
         if (CallInst *callInst = dyn_cast<CallInst>(pI)) {
             Function *calledF = callInst->getCalledFunction();
+            if (!calledF) {
+              // Indirect function invocation, should not matter.
+              continue;
+            }
 
             if (calledF->getName() == CUDA_RUNTIME_CONFIGURECALL) {
-                scaleGrid(configBlock, callInst);
+                scaleGrid(configBlock, callInst, kernelName);
                 ret = callInst;
             }
         } 
@@ -616,7 +644,7 @@ CallInst *CUDACoarseningPass::amendConfiguration(Module&     M,
 
 AllocaInst *CreateAllocaA(IRBuilder<> *b, Type *Ty, Value *ArraySize = nullptr,
                          const Twine &Name = "", unsigned int align = 8) {
-        const DataLayout &DL = b->GetInsertBlock()->getParent()->getParent()->getDataLayout();
+    const DataLayout &DL = b->GetInsertBlock()->getParent()->getParent()->getDataLayout();
 return b->Insert(new AllocaInst(Ty, DL.getAllocaAddrSpace(), ArraySize, align), Name);
 }
 
@@ -636,7 +664,8 @@ void CUDACoarseningPass::insertCudaConfigureCallScaled(Module& M)
     if (m_dynamicMode) {
         FunctionCallee scaled = M.getOrInsertFunction(
             "cudaConfigureCallScaled",
-            Type::getInt32Ty(ctx),   // return
+            Type::getInt32Ty(ctx),   // return type
+            Type::getInt8PtrTy(ctx), // deviceFun
             Type::getInt64Ty(ctx),   // gridXY
             Type::getInt32Ty(ctx),   // gridZ
             Type::getInt64Ty(ctx),   // blockXY
@@ -855,6 +884,87 @@ void CUDACoarseningPass::insertCudaLaunchDynamic(Module& M)
 
         return;
     } 
+}
+
+// PRIVATE ACCESSORS
+bool CUDACoarseningPass::shouldCoarsen(Function& F, bool hostCode) const
+{
+    if (m_coarsenedKernelMap.find(&F) != m_coarsenedKernelMap.end()) {
+        // Function was already coarsened.
+        return false;
+    }
+
+    if (F.isDeclaration()) {
+        // F does not contain the function body.
+        return false;
+    }
+
+    if (hostCode) {
+        CallInst *cudaRegFuncCall = cudaRegistrationCallForKernel(*F.getParent(),
+                                                                  F.getName());
+        if (!cudaRegFuncCall) {
+            // We can only coarsen host code functions that were originally
+            // registered.
+            return false;
+        }
+
+        if (m_kernelName.empty() && m_dynamicMode) {
+            // In dynamic mode with no kernel name specified, we coarsen all
+            // the available kernels.
+            return true;
+        }
+    }
+
+    if (!Util::isKernelFunction(F) && !hostCode) {
+        // F is not a kernel function.
+        return false;
+    }
+
+    std::string name = Util::nameFromDemangled(Util::demangle(F.getName()));
+
+    if (m_dynamicMode && !m_kernelName.empty() && name != m_kernelName) {
+        // In dynamic mode, empty kernel name means we generate coarsened
+        // versions of all the kernels. However, if kernel name is specified,
+        // only that kernel is processed.
+        return false;
+    }
+
+    if (!m_dynamicMode && name != m_kernelName) {
+        // In regular mode, name has to match.
+        return false;
+    }
+
+    return true;
+}
+
+CallInst *
+CUDACoarseningPass::cudaRegistrationCallForKernel(Module&     M,
+                                                  std::string kernelName) const
+{
+    for (Function& F : M) {
+        for (BasicBlock& B : F) {
+            for (Instruction& I : B) {
+                Instruction *pI = &I;
+                if (CallInst *callInst = dyn_cast<CallInst>(pI)) {
+                    Function *calledF = callInst->getCalledFunction();
+                    if (!calledF) {
+                        // Indirect function invocation, skip.
+                        continue;
+                    }
+
+                    if (calledF->getName() == CUDA_REGISTER_FUNC) {
+                        Constant *castPtr = cast<Constant>(callInst->getOperand(1));
+                        Function *stubF = cast<Function>(castPtr->getOperand(0));
+
+                        if (stubF->getName() == kernelName) {
+                            return callInst;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return nullptr;
 }
 
 static RegisterPass<CUDACoarseningPass> X("cuda-coarsening-pass",

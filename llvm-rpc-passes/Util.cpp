@@ -33,6 +33,16 @@ std::string Util::demangle(std::string mangledName)
     return (status == 0) ? result.get() : mangledName;
 }
 
+std::string Util::nameFromDemangled(std::string demangledName)
+{
+    std::size_t parenthesis = demangledName.find_first_of('(');
+    if (parenthesis != std::string::npos) {
+        return demangledName.substr(0, demangledName.find_first_of('('));
+    }
+
+    return demangledName;
+}
+
 unsigned int Util::numeralDimension(std::string strDim)
 {
     assert (strDim == "x" || strDim == "y" || strDim == "z");

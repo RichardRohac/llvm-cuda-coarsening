@@ -14,6 +14,8 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/PostDominators.h"
 
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
+
 #include "Common.h"
 #include "Util.h"
 #include "GridAnalysisPass.h"
@@ -32,6 +34,10 @@ DivergenceAnchorPass::DivergenceAnchorPass()
 {
 }
 
+void DivergenceAnchorPass::getAnalysisUsage(AnalysisUsage& AU) const
+{
+}
+
 bool DivergenceAnchorPass::runOnFunction(Function& F)
 {
     for (BasicBlock &B : F) {
@@ -43,17 +49,18 @@ bool DivergenceAnchorPass::runOnFunction(Function& F)
     BasicBlock *entry = &F.getEntryBlock();
     entry->splitBasicBlock(&entry->front(), "..rpc-anchor_entry");
 
-    std::vector<BasicBlock*> toSplit;
+    std::vector<std::pair<BasicBlock*, Instruction *> > toSplit;
     for (BasicBlock &B : F) {
         for (Instruction &I : B) {
             if (isa<ReturnInst>(&I)) {
-               toSplit.push_back(&B);
+               toSplit.push_back(std::make_pair<BasicBlock  *,
+                                                Instruction *>(&B, &I));
             }
         }
     }
-
-    for (BasicBlock *pB : toSplit) {
-        pB->splitBasicBlock(&pB->front(), "..rpc-anchor_end");
+    for (std::pair<BasicBlock *, Instruction *> s : toSplit) {
+        s.first->splitBasicBlock(s.second, "..rpc-anchor_end");
+    //    SplitBlock(pB, &pB->front(), "..rpc-anchor_end");
     }
 
     return true;
