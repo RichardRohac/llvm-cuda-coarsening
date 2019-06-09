@@ -20,6 +20,7 @@ struct uint3 {
 };
 
 typedef std::unordered_map<std::string, const char *> nameKernelMap_t;
+typedef std::unordered_map<const char *, const char *> kernelPtrMap_t;
 
 struct coarseningConfig {
     std::string name;
@@ -73,9 +74,6 @@ inline unsigned int errorFallback(struct dim3  gridDim,
                                   size_t       sharedMem,
                                   void        *stream)
 {
-    std::cout << "\nRPC_CONFIG undefined or has wrong format! \
-                    Running uncoarsened version!\n";
-
     return __cudaPushCallConfiguration(gridDim, blockDim, sharedMem, stream);
 }
 
@@ -103,7 +101,7 @@ inline bool parseConfig(char *str, coarseningConfig *result)
         return false;
     }
 
-    if (tokens[1] != "block" && tokens[1] != "thread") {
+    if (tokens[2] != "block" && tokens[2] != "thread") {
         return false;
     }
 
@@ -130,6 +128,12 @@ nameKernelMap_t& getNameKernelMap()
     return nameKernelMap;
 }
 
+kernelPtrMap_t& getKernelPtrMap()
+{
+    static kernelPtrMap_t kernelPtrMap;
+    return kernelPtrMap;
+}
+
 extern "C"
 const void rpcRegisterFunction(void       **fatCubinHandle,
                                const char  *hostFun,
@@ -143,6 +147,9 @@ const void rpcRegisterFunction(void       **fatCubinHandle,
                                int         *wSize)
 {
     nameKernelMap_t& nameKernelMap = getNameKernelMap();
+    kernelPtrMap_t& kernelPtrMap = getKernelPtrMap();
+
+    kernelPtrMap[hostFun] = deviceName;
 
     std::string name = demangle(deviceFun);
     name = name.substr(0, name.find_first_of('('));
@@ -152,7 +159,7 @@ const void rpcRegisterFunction(void       **fatCubinHandle,
     __cudaRegisterFunction(fatCubinHandle,
                            hostFun,
                            deviceFun,
-                           deviceName,
+                           deviceFun,
                            thread_limit,
                            tid,
                            bid,
@@ -161,7 +168,8 @@ const void rpcRegisterFunction(void       **fatCubinHandle,
                            wSize);
 }
 
-extern "C" unsigned int cudaConfigureCallScaled(struct dim3  gridDim,
+extern "C" unsigned int cudaConfigureCallScaled(const char  *deviceFun,
+                                                struct dim3  gridDim,
                                                 struct dim3  blockDim,
                                                 size_t       sharedMem,
                                                 void        *stream)
@@ -178,8 +186,12 @@ extern "C" unsigned int cudaConfigureCallScaled(struct dim3  gridDim,
         return errorFallback(gridDim, blockDim, sharedMem, stream);
     }
 
-//  printf("before %i %i %i - %i %i %i\n", gridDim.x, gridDim.y, gridDim.z,
-//                                         blockDim.x, blockDim.y, blockDim.z);
+    std::string dm = demangle(deviceFun);
+    dm = dm.substr(0, dm.find_first_of('('));
+
+    if (dm != config.name) {
+        return errorFallback(gridDim, blockDim, sharedMem, stream);
+    }
 
     dim3 *scaledDim = config.block ? &gridDim : &blockDim;
     if (config.direction == 0) {
@@ -191,9 +203,6 @@ extern "C" unsigned int cudaConfigureCallScaled(struct dim3  gridDim,
     else {
         scaledDim->z /= config.factor;
     }
-
-//  printf("after %i %i %i - %i %i %i\n", gridDim.x, gridDim.y, gridDim.z,
-//                                        blockDim.x, blockDim.y, blockDim.z);
 
 #ifdef CUDA_USES_NEW_LAUNCH
     return __cudaPushCallConfiguration(gridDim, blockDim, sharedMem, stream);
@@ -222,6 +231,8 @@ extern "C" unsigned int cudaLaunchDynamic(const void  *ptr,
     std::string nameScaled;
     nameScaled.append(config.name);
     nameScaled.append("_");
+    nameScaled.append(std::to_string(config.direction));
+    nameScaled.append("_");
     nameScaled.append(std::to_string(config.block ? config.factor : 1));
     nameScaled.append("_");
     nameScaled.append(std::to_string(config.block ? 1 : config.factor));
@@ -231,6 +242,16 @@ extern "C" unsigned int cudaLaunchDynamic(const void  *ptr,
     const nameKernelMap_t& map = getNameKernelMap();
     nameKernelMap_t::const_iterator it = map.find(nameScaled);
     if (it == map.end()) {
+        return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
+    }
+
+    const kernelPtrMap_t& kernelPtrMap = getKernelPtrMap();
+    kernelPtrMap_t::const_iterator ptrIt = kernelPtrMap.find(it->second);
+    if (ptrIt == kernelPtrMap.end()) {
+        return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
+    }
+
+    if (ptr != ptrIt->second) {
         return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
     }
 
