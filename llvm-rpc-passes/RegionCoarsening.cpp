@@ -52,44 +52,47 @@ void CUDACoarseningPass::initAliveMap(DivergentRegion *region,
 void CUDACoarseningPass::updateAliveMap(CoarseningMap& aliveMap,
                                         Map&           regionMap)
 {
-  for (auto &mapIter : aliveMap) {
-    InstVector &coarsenedInsts = mapIter.second;
-    Value *value = regionMap[mapIter.first];
-    assert(value != nullptr && "Missing alive value in region map");
-    coarsenedInsts.push_back(dyn_cast<Instruction>(value));
-  }
+    for (auto &mapIter : aliveMap) {
+        InstVector &coarsenedInsts = mapIter.second;
+        Value *value = regionMap[mapIter.first];
+        assert(value != nullptr && "Missing alive value in region map");
+        coarsenedInsts.push_back(dyn_cast<Instruction>(value));
+    }
 }
 
 void CUDACoarseningPass::updatePlaceholdersWithAlive(CoarseningMap& aliveMap) {
-  // Force the addition of the alive values to the coarsening map. 
-  for (auto mapIter : aliveMap) {
-    Instruction *alive = mapIter.first;
-    InstVector &coarsenedInsts = mapIter.second;
+    // Force the addition of the alive values to the coarsening map. 
+    for (auto mapIter : aliveMap) {
+        Instruction *alive = mapIter.first;
+        InstVector &coarsenedInsts = mapIter.second;
 
-    auto cIter = m_coarseningMap.find(alive); 
-    if(cIter == m_coarseningMap.end()) {
-      m_coarseningMap.insert(std::pair<Instruction *, InstVector>(alive, coarsenedInsts)); 
+        auto cIter = m_coarseningMap.find(alive); 
+        if(cIter == m_coarseningMap.end()) {
+        m_coarseningMap.insert(std::pair<Instruction *, InstVector>(alive, coarsenedInsts)); 
+        }
     }
-  }
-  
-  for (auto &mapIter : aliveMap) {
-    Instruction *alive = mapIter.first;
-    InstVector &coarsenedInsts = mapIter.second;
+    
+    for (auto &mapIter : aliveMap) {
+        Instruction *alive = mapIter.first;
+        InstVector &coarsenedInsts = mapIter.second;
 
-    updatePlaceholderMap(alive, coarsenedInsts);
-  }
+        updatePlaceholderMap(alive, coarsenedInsts);
+    }
 }
 
 void CUDACoarseningPass::replicateRegionImpl(DivergentRegion *region,
                                              CoarseningMap&   aliveMap)
 {
-  errs() << "Replicating "; region->getHeader()->dump(); errs() << "\n";
+    //region->getHeader()->getParent()->dump();
+    //errs() << "pred :" << region->getHeader()->getName() << "\n";
     BasicBlock *pred = getPredecessor(region, m_loopInfo);
-    BasicBlock *topInsertionPoint = pred; // region->getExiting()
-    BasicBlock *bottomInsertionPoint = region->getHeader(); //getExit(*region);
+    BasicBlock *bottomInsertionPoint = region->getHeader();
+    BasicBlock *firstDuplicate = nullptr; 
+
+    //errs() << "pred :" << pred->getName() << "\n";
+
     // Replicate the region.
     for (unsigned int index = 0; index < m_factor - 1; ++index) {
-
         Map valueMap;
         DivergentRegion *newRegion =
             region->clone(".cf" + Twine(index + 2), m_domT, valueMap);
@@ -100,60 +103,56 @@ void CUDACoarseningPass::replicateRegionImpl(DivergentRegion *region,
         std::for_each(m_coarseningMap.begin(),
                       m_coarseningMap.end(),
           [&](std::pair<Instruction*, InstVector> p) {
-              std::string name = p.first->getName();
-              name.append(".cf" + std::to_string(index + 2));
+            std::string name = p.first->getName();
+            name.append(".cf" + std::to_string(index + 2));
 
-              for (BasicBlock *BB : *newRegion) {
+            for (BasicBlock *BB : *newRegion) {
                 for (Instruction& I : *BB) {
-                  if (I.getName() == name) {
-                    InstVector tmp;
-                  
-                    for (Instruction *pI : p.second) {
-                      std::string _name = pI->getName();
-                      _name.append(".cf" + std::to_string(index + 2));
+                    if (I.getName() == name) {
+                        InstVector tmp;
+                    
+                        for (Instruction *pI : p.second) {
+                            std::string _name = pI->getName();
+                            _name.append(".cf" + std::to_string(index + 2));
 
-                      for (BasicBlock *pBB : *newRegion) {
-                        for (Instruction& cI : *pBB) {
-                          if (cI.getName() == _name) {
-                            tmp.push_back(&cI);
-                          }
+                            for (BasicBlock *pBB : *newRegion) {
+                                for (Instruction& cI : *pBB) {
+                                    if (cI.getName() == _name) {
+                                        tmp.push_back(&cI);
+                                    }
+                                }
+                            }
                         }
-                      }
+
+                        toAdd.push_back(std::pair<Instruction*,
+                                                  InstVector>(&I, tmp));
                     }
-                    //errs() << "Adding mapping from ";
-                    //I.dump();
-                    //for (Instruction *k : tmp) {
-                    //  k->dump();
-                    //}
-                   // errs() << "====\n";
-                    toAdd.push_back(std::pair<Instruction*, InstVector>(&I, tmp));
-                  }
                 }
-              }
-          });
+            }
+        });
 
         for (auto& ta : toAdd) {
-          m_coarseningMap.insert(ta);
+            m_coarseningMap.insert(ta);
         }
-
-        //for (auto& sh : m_coarseningMap) {
-        //  sh.first->dump();
-        //}
         
         applyCoarseningMap(*newRegion, index);
 
         // Connect the region to the CFG.
-        Util::changeBlockTarget(topInsertionPoint, newRegion->getHeader());
+        Util::changeBlockTarget(pred, newRegion->getHeader());
         Util::changeBlockTarget(newRegion->getExiting(), bottomInsertionPoint);
 
         // Update the phi nodes of the newly inserted header.
-        //Util::remapBlocksInPHIs(newRegion->getHeader(), pred, topInsertionPoint);
-        // Update the phi nodes in the exit block.
-        //Util::remapBlocksInPHIs(bottomInsertionPoint, topInsertionPoint,
-        //                        newRegion->getExiting());
+        Util::remapBlocksInPHIs(newRegion->getHeader(), firstDuplicate, pred);
 
-        //topInsertionPoint = newRegion->getHeader();
-        bottomInsertionPoint = newRegion->getHeader(); //getExit(*newRegion);
+        // Update the phi nodes in the exit block.
+        Util::remapBlocksInPHIs(bottomInsertionPoint,
+                                pred,
+                                newRegion->getExiting());
+
+        bottomInsertionPoint = newRegion->getHeader();
+        if (firstDuplicate == nullptr) {
+            firstDuplicate = newRegion->getExiting();
+        }
 
         delete newRegion;
         updateAliveMap(aliveMap, valueMap);
