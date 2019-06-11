@@ -30,6 +30,7 @@ public:
     RegionVector& getRegions();
     InstVector& getOutermostInstructions();
     InstVector& getInstructions();
+    GlobalsSet& getDivergentGlobals(Function *F);
 
     bool isDivergent(Instruction *inst);
 
@@ -45,6 +46,10 @@ protected:
     void findOutermostRegions();
 
     void findUsers(InstVector& seeds, InstVector *out, bool skipBranches);
+    void findSharedMemoryUsers(GlobalVariable *smVar,
+                               InstSet        *out,
+                               Function       *F,
+                               Instruction    *inst);
 
     RegionVector cleanUpRegions(RegionVector& regions, const DominatorTree *dt);
 
@@ -54,6 +59,7 @@ protected:
     InstVector         m_divergentBranches;
     RegionVector       m_regions;
     RegionVector       m_outermostRegions;
+    GlobalsMap         m_divergentGlobals;
 
     LoopInfo          *m_loopInfo;
     PostDominatorTree *m_postDomT;

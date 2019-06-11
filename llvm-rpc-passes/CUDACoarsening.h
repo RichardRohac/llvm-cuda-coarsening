@@ -62,10 +62,11 @@ class CUDACoarseningPass : public ModulePass {
                    CallInst    *configCall,
                    std::string  kernelName);
 
-    void coarsenKernel();
+    void coarsenKernel(Function& F);
     void replacePlaceholders();
 
     void replicateInstruction(Instruction *inst);
+    void replicateGlobal(GlobalVariable *gv);
     void replicateRegion(DivergentRegion *region);
     void replicateRegionClassic(DivergentRegion *region);
 
@@ -111,6 +112,8 @@ class CUDACoarseningPass : public ModulePass {
     CoarseningMap           m_coarseningMap;
     CoarseningMap           m_phMap;
     Map                     m_phReplacementMap;
+    GlobalsSet              m_divergentGlobals;
+    GlobalsCMap             m_globalsCoarseningMap;
 
     Function               *m_rpcLaunchKernel;
     Function               *m_rpcRegisterFunction;

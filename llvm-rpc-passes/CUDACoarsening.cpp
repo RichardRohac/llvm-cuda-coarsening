@@ -213,7 +213,7 @@ bool CUDACoarseningPass::handleDeviceCode(Module& M)
             }
 
             scaleKernelGrid();
-            coarsenKernel();
+            coarsenKernel(F);
             replacePlaceholders();
         }
     }
@@ -315,7 +315,7 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
 
 void CUDACoarseningPass::generateVersions(Function& F, bool deviceCode)
 {
-    std::vector<unsigned int> factors = {2, 4, 8, 16};
+    std::vector<unsigned int> factors = {2, 4, 8};
     std::vector<unsigned int> strides = {1, 2, 32};
     std::vector<unsigned int> dimensions = {0, 1};
 
@@ -433,7 +433,7 @@ void CUDACoarseningPass::generateVersion(Function&     F,
 
     analyzeKernel(*cloned);
     scaleKernelGrid();
-    coarsenKernel();
+    coarsenKernel(*cloned);
     replacePlaceholders();
 
     SmallVector<Metadata *, 3> operandsMD;

@@ -25,6 +25,7 @@ namespace llvm {
     class BranchInst;
     class WeakTrackingVH;
     class PHINode;
+    class GlobalVariable;
 }
 
 class DivergentRegion;
@@ -53,6 +54,11 @@ typedef std::vector<DivergentRegion *> RegionVector;
 typedef std::map<llvm::Instruction *, InstVector> CoarseningMap;
 
 typedef std::vector<llvm::PHINode *> PhiVector;
+
+typedef std::set<llvm::GlobalVariable *> GlobalsSet;
+typedef std::map<llvm::Function *, GlobalsSet> GlobalsMap;
+typedef std::map<llvm::GlobalVariable *, std::vector<llvm::GlobalVariable *>>
+    GlobalsCMap;
 
 // ===========================================================================
 // HELPER FUNCTIONS

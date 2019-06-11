@@ -8,6 +8,7 @@
 
 #include <llvm/Pass.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/GlobalVariable.h>
 
 #include "Common.h"
 #include "CUDACoarsening.h"
@@ -26,7 +27,7 @@ Instruction *getAddInstNSW(Value *firstValue, Value *secondValue) {
 }
 
 
-void CUDACoarseningPass::coarsenKernel()
+void CUDACoarseningPass::coarsenKernel(Function& F)
 {
     RegionVector& regions = m_blockLevel ?
                             m_divergenceAnalysisBL->getOutermostRegions() :
@@ -34,6 +35,16 @@ void CUDACoarseningPass::coarsenKernel()
     InstVector& insts = m_blockLevel ?
                         m_divergenceAnalysisBL->getOutermostInstructions() :
                         m_divergenceAnalysisTL->getOutermostInstructions();
+
+    if (m_blockLevel) {
+      m_divergentGlobals = m_divergenceAnalysisBL->getDivergentGlobals(&F);
+
+      std::for_each(m_divergentGlobals.begin(),
+                    m_divergentGlobals.end(),
+		                [this](GlobalVariable *gv) {
+                      replicateGlobal(gv);
+                    });
+    }
 
     // Replicate instructions.
     for(InstVector::iterator it = insts.begin(); it != insts.end(); ++it) {
@@ -86,6 +97,25 @@ void CUDACoarseningPass::replicateInstruction(Instruction *inst)
     updatePlaceholderMap(inst, current);
 }
 
+void CUDACoarseningPass::replicateGlobal(GlobalVariable *gv)
+{
+  for (unsigned int index = 0; index < m_factor - 1; ++index) {
+    Module &module = *(gv->getParent());
+    GlobalVariable *newGV = new GlobalVariable(
+                               module,
+                               gv->getType()->getPointerElementType(),
+                               gv->isConstant(),
+                               gv->getLinkage(),
+                               gv->getInitializer(),
+                               gv->getName() + "..cf" + Twine(index + 2), //TODO
+                               (GlobalVariable *) nullptr,
+                               gv->getThreadLocalMode(),
+                               gv->getType()->getAddressSpace());
+    newGV->copyAttributesFrom(gv);
+    m_globalsCoarseningMap[gv].push_back(newGV);
+  }
+}
+
 void CUDACoarseningPass::applyCoarseningMap(DivergentRegion &region,
                                           unsigned int index)
 {
@@ -111,6 +141,14 @@ void CUDACoarseningPass::applyCoarseningMap(Instruction  *inst,
    // }
 
     for (unsigned int i = 0; i < inst->getNumOperands(); ++i) {
+        if(isa<GlobalVariable>(inst->getOperand(i)) && m_blockLevel) {
+            GlobalVariable *gv = cast<GlobalVariable>(inst->getOperand(i));
+            if (m_divergentGlobals.find(gv) != m_divergentGlobals.end()) {
+                GlobalVariable *divGV = m_globalsCoarseningMap[gv][index];
+                inst->setOperand(i, divGV);
+            }
+            continue;
+        }
         if (!isa<Instruction>(inst->getOperand(i))) {
             continue;
         }

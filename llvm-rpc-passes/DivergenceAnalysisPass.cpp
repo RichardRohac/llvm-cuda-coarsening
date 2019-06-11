@@ -65,6 +65,11 @@ InstVector& DivergenceAnalysisPass::getInstructions()
     return m_divergent;
 }
 
+GlobalsSet& DivergenceAnalysisPass::getDivergentGlobals(Function *F) 
+{
+  return m_divergentGlobals[F];
+}
+
 bool DivergenceAnalysisPass::isDivergent(Instruction *inst)
 {
     return isPresent(inst, m_divergent);
@@ -190,6 +195,48 @@ void DivergenceAnalysisPass::findUsers(InstVector&  seeds,
         }
 
         Util::findUsesOf(inst, users, skipBranches);
+
+        if (m_blockLevel) {
+            if(isa<StoreInst>(inst) || isa<LoadInst>(inst)) {
+                Value *ptrOp = isa<StoreInst>(inst) ? inst->getOperand(1)
+                                                    : inst->getOperand(0);
+
+                errs() << "Found store / load:";
+                inst->dump();
+                errs() << "looking at operand: ";
+                ptrOp->dump();
+
+                if (isa<AddrSpaceCastInst>(ptrOp)) {
+                    errs() << "is addrspacecastinst!\n";
+                    // Sometimes there is space cast instruction before store
+                    AddrSpaceCastInst *spaceCastInst = 
+                              dyn_cast<AddrSpaceCastInst>(ptrOp);
+                    if (spaceCastInst) {
+                        ptrOp = spaceCastInst->getOperand(0);
+                    }
+
+                    BitCastInst *bitCastInst = dyn_cast<BitCastInst>(ptrOp);
+                    if (bitCastInst) {
+                            errs() << "is bitcastinst!\n";
+                        ptrOp = bitCastInst->getOperand(0);
+                    }
+                }
+                GetElementPtrInst *gep = dyn_cast<GetElementPtrInst>(ptrOp);
+                if (gep) {
+                    errs() << "got gepski";
+                    gep->dump();
+                    if (gep->getAddressSpace() == 3) { // shared memory gep) {
+                        errs() << "GOT HERE!" << "\n";
+                        findSharedMemoryUsers(
+                            dyn_cast<GlobalVariable>(gep->getPointerOperand()),
+                            &users,
+                            gep->getParent()->getParent(),
+                            inst);
+                    }
+                }
+            }
+        }
+
         // Add users of the current instruction to the work list.
         for (InstSet::iterator iter = users.begin();
              iter != users.end();
@@ -199,6 +246,51 @@ void DivergenceAnalysisPass::findUsers(InstVector&  seeds,
             }
         }
     }
+}
+
+void DivergenceAnalysisPass::findSharedMemoryUsers(GlobalVariable *smVar,
+                                                   InstSet        *out,
+                                                   Function       *F,
+                                                   Instruction    *inst)
+{
+    if (!smVar || !out) {
+        return;
+    }
+
+    for (auto userIter = smVar->user_begin();
+         userIter != smVar->user_end();
+         ++userIter) {
+        if (Instruction *userInst = dyn_cast<Instruction>(*userIter)) {
+            if (userInst->getParent()->getParent() != F) {
+                continue;
+            }
+
+            if (userInst == inst) {
+                continue;
+            }
+
+            out->insert(userInst);
+        }
+        else {
+            for (auto it = userIter->user_begin();
+                it != userIter->user_end();
+                ++it) {
+                if (Instruction *userInst = dyn_cast<Instruction>(*it)) {
+                    if (userInst->getParent()->getParent() != F) {
+                        continue;
+                    }
+
+                    if (userInst == inst) {
+                        continue;
+                    }
+
+                    out->insert(userInst);
+                }
+            }
+        }
+    }
+
+    m_divergentGlobals[F].insert(smVar);
 }
 
 RegionVector DivergenceAnalysisPass::cleanUpRegions(RegionVector&        regions,
