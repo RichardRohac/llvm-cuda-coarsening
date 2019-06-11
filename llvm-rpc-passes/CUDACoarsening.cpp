@@ -832,11 +832,6 @@ bool CUDACoarseningPass::shouldCoarsen(Function& F, bool hostCode) const
         return false;
     }
 
-    if (F.isDeclaration()) {
-        // F does not contain the function body.
-        return false;
-    }
-
     if (hostCode) {
         CallInst *cudaRegFuncCall = cudaRegistrationCallForKernel(*F.getParent(),
                                                                   F.getName());
@@ -846,33 +841,14 @@ bool CUDACoarseningPass::shouldCoarsen(Function& F, bool hostCode) const
             return false;
         }
 
-        if (m_kernelName.empty() && m_dynamicMode) {
-            // In dynamic mode with no kernel name specified, we coarsen all
+        if (m_kernelName == "all" && m_dynamicMode) {
+            // In dynamic mode we can coarsen all
             // the available kernels.
             return true;
         }
     }
 
-    if (!Util::isKernelFunction(F) && !hostCode) {
-        // F is not a kernel function.
-        return false;
-    }
-
-    std::string name = Util::nameFromDemangled(Util::demangle(F.getName()));
-
-    if (m_dynamicMode && !m_kernelName.empty() && name != m_kernelName) {
-        // In dynamic mode, empty kernel name means we generate coarsened
-        // versions of all the kernels. However, if kernel name is specified,
-        // only that kernel is processed.
-        return false;
-    }
-
-    if (!m_dynamicMode && name != m_kernelName) {
-        // In regular mode, name has to match.
-        return false;
-    }
-
-    return true;
+    return Util::shouldCoarsen(F, m_kernelName, hostCode, m_dynamicMode);
 }
 
 CallInst *

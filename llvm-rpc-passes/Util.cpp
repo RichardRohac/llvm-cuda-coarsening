@@ -16,6 +16,38 @@ bool findOneNVVMAnnotation(const GlobalValue  *gv,
                            const std::string&  prop,
                            unsigned int&       retval);
 
+bool Util::shouldCoarsen(Function&   F,
+                         std::string kernelName,
+                         bool        isHostCode,
+                         bool        isDynamicMode)
+{
+    if (F.isDeclaration()) {
+        // F does not contain the function body.
+        return false;
+    }
+
+    if (!Util::isKernelFunction(F) && !isHostCode) {
+        // F is not a kernel function.
+        return false;
+    }
+
+    std::string name = Util::nameFromDemangled(Util::demangle(F.getName()));
+
+    if (isDynamicMode && kernelName != "all" && name != kernelName) {
+        // In dynamic mode, kernel name "all" means we generate coarsened
+        // versions of all the kernels. However, if kernel name is specified,
+        // only that kernel is processed.
+        return false;
+    }
+
+    if (!isDynamicMode && name != kernelName) {
+        // In regular mode, name has to match.
+        return false;
+    }
+
+    return true;
+}
+
 std::string Util::demangle(std::string mangledName)
 {
     // Version for Linux (GNU C++)

@@ -54,6 +54,10 @@ namespace llvm {
 
 class Util {
   public:
+    static bool shouldCoarsen(llvm::Function& F,
+                              std::string     kernelName,
+                              bool            isHostCode,
+                              bool            isDynamicMode);
     static std::string demangle(std::string mangledName);
     static std::string nameFromDemangled(std::string demangledName);
     static unsigned int numeralDimension(std::string strDim);

@@ -52,17 +52,15 @@ void BranchExtractionPass::getAnalysisUsage(AnalysisUsage& AU) const
 bool BranchExtractionPass::runOnFunction(Function& F)
 {
     // Apply the pass to kernels only.
-    if (!Util::isKernelFunction(F))
+    if (!Util::shouldCoarsen(F, CLKernelName, false, CLCoarseningMode == "dynamic")) {
         return false;
+    }
 
     std::string FunctionName = F.getName();
     FunctionName = Util::demangle(FunctionName);
     FunctionName = Util::nameFromDemangled(FunctionName);
-    if (CLKernelName != "" && FunctionName != CLKernelName)
-        return false;
 
-    errs() << "BC RUNNING ON " << CLKernelName << "!\n";
-
+    errs() << "Branch extraction pass running on " << FunctionName << "\n";
 
     // Perform analyses.
     loopInfo = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
