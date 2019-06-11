@@ -59,6 +59,20 @@ cl::opt<std::string> CLCoarseningMode(
 
 using namespace llvm;
 
+// IR helpers -----------------------------------------------------------------
+AllocaInst *CreateAlignedAlloca(llvm::Module&      M,
+                                llvm::IRBuilder<> *builder,
+                                llvm::Type        *type,
+                                unsigned int       alignment,
+                                const Twine&       name = "",
+                                llvm::Value       *ArraySize = nullptr)
+{
+    const DataLayout &DL = M.getDataLayout();
+    return builder->Insert(
+            new AllocaInst(type, DL.getAllocaAddrSpace(), ArraySize, alignment),
+            name);
+}
+
 char CUDACoarseningPass::ID = 0;
 
 // CREATORS
@@ -109,7 +123,7 @@ bool CUDACoarseningPass::runOnModule(Module& M)
 
 void CUDACoarseningPass::getAnalysisUsage(AnalysisUsage& AU) const
 {
-    AU.addRequired<DivergenceAnchorPass>();
+   // AU.addRequired<DivergenceAnchorPass>();
     AU.addRequired<LoopInfoWrapperPass>();
     AU.addRequired<PostDominatorTreeWrapperPass>();
     AU.addRequired<DominatorTreeWrapperPass>();
@@ -213,17 +227,18 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
 
     bool foundGrid = false;
 
-    m_cudaConfigureCallScaled = nullptr;
-    m_cudaLaunchDynamic = nullptr;
-    insertCudaConfigureCallScaled(M);
-    insertCudaLaunchDynamic(M);
+    insertRPCFunctions(M);
 
-    std::vector<CallInst*> toRemove;
+    // We are replacing function call instructions; this array will hold the
+    // original functions calls which will get removed from the IR.
+    std::vector<CallInst *> forRemoval;
 
     for (Function& F : M) {
         for (BasicBlock& B: F) {
             for (Instruction& I : B) {
                 Instruction *pI = &I;
+
+                // Find cudaLaunchKernel call instruction.
                 if (CallInst *callInst = dyn_cast<CallInst>(pI)) {
                     Function *calledF = callInst->getCalledFunction();
                     if (!calledF) {
@@ -231,77 +246,60 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
                         continue;
                     }
 
-                    if (calledF->getName() == CUDA_RUNTIME_LAUNCH) {
-                        // cudaLaunch receives function pointer as an argument.
-                        Constant *castPtr = 
-                                        cast<Constant>(callInst->getOperand(0));
-                        Function *kernelF =
-                                         cast<Function>(castPtr->getOperand(0));
-
-                        std::string kernel = Util::demangle(kernelF->getName());
-                        kernel = Util::nameFromDemangled(kernel);
-
-                        if (!shouldCoarsen(*kernelF, true)) {
-                            continue;
-                        }
-
-                        errs() << "--  INFO  -- Found cudaLaunch of "
-                               << kernel << "\n";
-                        foundGrid = true;
-
-                        if (m_dynamicMode) {
-                            // In dynamic mode, replace the launch call with
-                            // the dispatcher function.
-                            callInst->setCalledFunction(m_cudaLaunchDynamic);
-                        }
-
-                        BasicBlock *configOKBlock = &B;
-
-                        #ifndef CUDA_USES_NEW_LAUNCH
-                        // Call to cudaLaunch is preceded by "numArgs()" of
-                        // blocks, where the very first one is referenced by
-                        // the unconditional branch instruction that checks
-                        // for valid configuration (call to cudaConfigureCall).
-                        for (unsigned int i = 0;
-                             i < kernelF->arg_size();
-                             ++i) {
-                                 configOKBlock = configOKBlock->getPrevNode();
-                        }
-                        #endif
-
-                        // FIXED!
-                        // Depending on the optimization level, we might be
-                        // in a kernelname() function call.
-                        std::string pn = configOKBlock->getParent()->getName();
-                        pn = Util::demangle(pn);
-                        pn = Util::nameFromDemangled(pn);
-
-                        if (pn == kernel) {
-                            for (Function& xF : M) {
-                                for (BasicBlock& xB: xF) {
-                                    for (Instruction& xI : xB) {
-                                        Instruction *pxI = &xI;
-                                        if (CallInst *callInst = dyn_cast<CallInst>(pxI)) {
-                                            Function *calledxF = callInst->getCalledFunction();
-                                            if (calledxF == configOKBlock->getParent()) {
-                                                CallInst *rem = amendConfiguration(M, callInst->getParent(), kernelF->getName());
-                                                assert(rem != nullptr);
-                                                toRemove.push_back(rem);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        else {
-                            CallInst *rem = amendConfiguration(M, configOKBlock, kernelF->getName());
-                            assert(rem != nullptr);
-                            toRemove.push_back(rem);
-                        }
+                    if (calledF->getName() != CUDA_RUNTIME_LAUNCH) {
+                        // Not a call to cudaLaunchKernel.
+                        continue;
                     }
+
+                    // cudaLaunchKernel receives function pointer as first
+                    // parameter. This function pointer can be used to identify
+                    // if this is the launch of the kernel we want to coarsen.
+                    Constant *cptr = dyn_cast<Constant>(callInst->getOperand(0));
+                    if (!cptr) {
+                        // TODO investigate this - sometimes this is of Value
+                        // type, but seems that for uninteresting calls for us.
+                        continue;
+                    }
+                    Function *kernelF = dyn_cast<Function>(cptr->getOperand(0));
+
+                    std::string kernel = Util::demangle(kernelF->getName());
+                    kernel = Util::nameFromDemangled(kernel);
+
+                    if (!shouldCoarsen(*kernelF, true)) {
+                        continue;
+                    }
+
+                    errs() << "--  INFO  -- Found cudaLaunch of " << kernel;
+                    errs() << "\n";
+                    foundGrid = true;
+
+                    if (m_dynamicMode) {
+                        // In dynamic mode, replace the launch call with
+                        // the dispatcher function.
+                        //callInst->setCalledFunction(m_cudaLaunchDynamic);
+                        continue;
+                    }
+
+                    scaleGrid(callInst->getParent(),
+                              callInst,
+                              kernelF->getName());
+
+                    forRemoval.push_back(callInst);
                 }
             }
         }
+    }
+
+    for(CallInst *rem : forRemoval) {
+        // Remove original calls to cudaLaunchKernel. These are now replaced
+        // with our version.
+        rem->eraseFromParent();
+    }
+
+    if (!foundGrid) {
+        // If no kernel invocation was found, remove the previously inserted
+        // helper functions.
+        deleteRPCFunctions(M);
     }
 
     if (m_dynamicMode) {
@@ -309,22 +307,6 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
             if (shouldCoarsen(F, true)) {
                 generateVersions(F, false);
             }
-        }
-    }
-
-    for(CallInst *rem : toRemove) {
-        rem->eraseFromParent();
-    }
-
-    if (!foundGrid) {
-        // If no kernel invocation was found, remove the previously inserted
-        // helper functions.
-        if (m_cudaConfigureCallScaled != nullptr) {
-            m_cudaConfigureCallScaled->eraseFromParent();
-        }
-
-        if (m_cudaLaunchDynamic != nullptr) {
-            m_cudaLaunchDynamic->eraseFromParent();
         }
     }
 
@@ -481,7 +463,7 @@ std::string CUDACoarseningPass::namedKernelVersion(std::string kernel,
     // C code?
 
     std::string demangled = Util::demangle(kernel);
-    demangled = demangled.substr(0, demangled.find_first_of('('));
+    demangled = Util::nameFromDemangled(demangled);
 
     std::string suffix = "_";
     suffix.append(std::to_string(d));
@@ -551,7 +533,7 @@ void CUDACoarseningPass::scaleGrid(BasicBlock *configBlock,
         args.push_back(builder.getInt8(scaleBlock[2])); // scale block Z
     }
     else {
-        llvm::CallInst *regFunc = cudaRegistrationCallForKernel(
+        /*llvm::CallInst *regFunc = cudaRegistrationCallForKernel(
                              *configCall->getParent()->getParent()->getParent(),
                              kernelName);
         GEPOperator *origGEP = dyn_cast<GEPOperator>(regFunc->getOperand(2));
@@ -568,91 +550,43 @@ void CUDACoarseningPass::scaleGrid(BasicBlock *configBlock,
                                                                    "",
                                                                    configCall);
 
-        args.insert(args.begin(), gep);
+        args.insert(args.begin(), gep);*/
     }
 
-    CallInst *newCall = builder.CreateCall(m_cudaConfigureCallScaled, args);
-    newCall->setCallingConv(m_cudaConfigureCallScaled->getCallingConv());
+    CallInst *newCall = builder.CreateCall(m_rpcLaunchKernel, args);
+    newCall->setCallingConv(m_rpcLaunchKernel->getCallingConv());
     if (!configCall->use_empty()) {
         configCall->replaceAllUsesWith(newCall);
     }
 }
 
-CallInst *CUDACoarseningPass::amendConfiguration(Module&     M,
-                                                 BasicBlock *configOKBlock,
-                                                 std::string kernelName)
+void CUDACoarseningPass::insertRPCFunctions(Module& M)
 {
-    CallInst *ret = nullptr;
+    m_rpcLaunchKernel = nullptr;
+    m_rpcRegisterFunction = nullptr;
 
-    if (configOKBlock == nullptr) {
-        assert(0 && "Found cudaLaunch without corresponding config block!");
+    insertRPCLaunchKernel(M);
+    if (m_dynamicMode) {
+        insertRPCRegisterFunction(M);
     }
-
-    // Find branch instruction jumping to the "configOK" block.
-    // This instruction is located within a block that handles
-    // cudaConfigureCall().
-    BasicBlock *configBlock = nullptr;
-    for (Function& F : M) {
-        for (BasicBlock& B: F) {
-            for (Instruction& I : B) {
-                if (isa<BranchInst>(&I)) {
-                    BranchInst *bI = cast<BranchInst>(&I);
-                    if (bI->getNumOperands() == 3) {
-                        if(isa<BasicBlock>(bI->getOperand(1))) {
-                            BasicBlock *targetBlock =
-                                            cast<BasicBlock>(bI->getOperand(1));
-
-                            if (targetBlock == configOKBlock) {
-                                configBlock = bI->getParent();
-                            }
-                        }
-                        
-                        if(isa<BasicBlock>(bI->getOperand(2))) {
-                            BasicBlock *targetBlock =
-                                            cast<BasicBlock>(bI->getOperand(2));
-
-                            if (targetBlock == configOKBlock) {
-                                configBlock = bI->getParent();
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    assert(configBlock != nullptr);
-
-    for (Instruction& I : *configBlock) {
-        Instruction *pI = &I;
-        if (CallInst *callInst = dyn_cast<CallInst>(pI)) {
-            Function *calledF = callInst->getCalledFunction();
-            if (!calledF) {
-              // Indirect function invocation, should not matter.
-              continue;
-            }
-
-            if (calledF->getName() == CUDA_RUNTIME_CONFIGURECALL) {
-                scaleGrid(configBlock, callInst, kernelName);
-                ret = callInst;
-            }
-        } 
-    }
-
-    return ret;
 }
 
-AllocaInst *CreateAllocaA(IRBuilder<> *b, Type *Ty, Value *ArraySize = nullptr,
-                         const Twine &Name = "", unsigned int align = 8) {
-    const DataLayout &DL = b->GetInsertBlock()->getParent()->getParent()->getDataLayout();
-return b->Insert(new AllocaInst(Ty, DL.getAllocaAddrSpace(), ArraySize, align), Name);
+void CUDACoarseningPass::deleteRPCFunctions(Module& M)
+{
+    if (m_rpcLaunchKernel) {
+        m_rpcLaunchKernel->eraseFromParent();
+    }
+
+    if (m_rpcRegisterFunction) {
+        m_rpcRegisterFunction->eraseFromParent();
+    }
 }
 
-void CUDACoarseningPass::insertCudaConfigureCallScaled(Module& M)
+void CUDACoarseningPass::insertRPCLaunchKernel(Module& M)
 {
     LLVMContext& ctx = M.getContext();
 
-    Function *original = M.getFunction(CUDA_RUNTIME_CONFIGURECALL);
+    Function *original = M.getFunction(CUDA_RUNTIME_LAUNCH);
     assert(original != nullptr);
 
     FunctionType *origFT = original->getFunctionType();
@@ -662,7 +596,7 @@ void CUDACoarseningPass::insertCudaConfigureCallScaled(Module& M)
     // In case of dynamic mode, we use configuration function provided
     // externally.
     if (m_dynamicMode) {
-        FunctionCallee scaled = M.getOrInsertFunction(
+        /*FunctionCallee scaled = M.getOrInsertFunction(
             "cudaConfigureCallScaled",
             Type::getInt32Ty(ctx),   // return type
             Type::getInt8PtrTy(ctx), // deviceFun
@@ -677,18 +611,20 @@ void CUDACoarseningPass::insertCudaConfigureCallScaled(Module& M)
         ptrF = cast<Function>(scaled.getCallee());
         ptrF->setCallingConv(original->getCallingConv());
 
-        m_cudaConfigureCallScaled = ptrF;
+        m_cudaConfigureCallScaled = ptrF;*/
 
         return;
     }
 
+    // Copy the original argument types.
     SmallVector<Type *, 16> scaledArgs;
     for (auto& arg : origFT->params()) {
         scaledArgs.push_back(arg);
     }
 
-    assert(original->arg_size() == 6 && "This ABI is not supported yet!");
+    assert(original->arg_size() == 8 && "This ABI is not supported yet!");
 
+    // Append grid and block scale arguments' types.
     scaledArgs.push_back(Type::getInt8Ty(ctx));
     scaledArgs.push_back(Type::getInt8Ty(ctx));
     scaledArgs.push_back(Type::getInt8Ty(ctx));
@@ -696,144 +632,166 @@ void CUDACoarseningPass::insertCudaConfigureCallScaled(Module& M)
     scaledArgs.push_back(Type::getInt8Ty(ctx));
     scaledArgs.push_back(Type::getInt8Ty(ctx));
 
+    // Insert the function prototype.
     FunctionCallee scaled = M.getOrInsertFunction(
-        "cudaConfigureCallScaled",
+        "rpcLaunchKernel",
         FunctionType::get(original->getReturnType(), scaledArgs, false)
     );
 
     ptrF = cast<Function>(scaled.getCallee());
     ptrF->setCallingConv(original->getCallingConv());
 
+    // Name the function arguments.
     Function::arg_iterator argIt = ptrF->arg_begin();
-    Value *gridXY = argIt++; gridXY->setName("gridXY");
-    Value *gridZ = argIt++; gridZ->setName("gridZ");
-    Value *blockXY = argIt++; blockXY->setName("blockXY");
-    Value *blockZ = argIt++; blockZ->setName("blockZ");
-    Value *sharedMem = argIt++; sharedMem->setName("sharedMem");
-    Value *cudaStream = argIt++; cudaStream->setName("cudaStream");
-    Value *scaleGridX = argIt++; scaleGridX->setName("sgX");
-    Value *scaleGridY = argIt++; scaleGridY->setName("sgY");
-    Value *scaleGridZ = argIt++; scaleGridZ->setName("sgZ");
-    Value *scaleBlockX = argIt++; scaleBlockX->setName("sbX");
-    Value *scaleBlockY = argIt++; scaleBlockY->setName("sbY");
-    Value *scaleBlockZ = argIt++; scaleBlockZ->setName("sbZ");
+    Value *argFuncPtr = argIt++; argFuncPtr->setName("funcPtr");
+    Value *argGridXY = argIt++; argGridXY->setName("gridXY");
+    Value *argGridZ = argIt++; argGridZ->setName("gridZ");
+    Value *argBlockXY = argIt++; argBlockXY->setName("blockXY");
+    Value *argBlockZ = argIt++; argBlockZ->setName("blockZ");
+    Value *argArgs = argIt++; argArgs->setName("args");
+    Value *argSharedMem = argIt++; argSharedMem->setName("sharedMem");
+    Value *argCudaStream = argIt++; argCudaStream->setName("cudaStream");
+    // New arguments:
+    Value *argScaleGridX = argIt++; argScaleGridX->setName("scaleGridX");
+    Value *argScaleGridY = argIt++; argScaleGridY->setName("scaleGridY");
+    Value *argScaleGridZ = argIt++; argScaleGridZ->setName("scaleGridZ");
+    Value *argScaleBlockX = argIt++; argScaleBlockX->setName("scaleBlockX");
+    Value *argScaleBlockY = argIt++; argScaleBlockY->setName("scaleBlockY");
+    Value *argScaleBlockZ = argIt++; argScaleBlockZ->setName("scaleBlockZ");
 
+    // Build the function body.
     BasicBlock* block = BasicBlock::Create(ctx, "entry", ptrF);
     IRBuilder<> builder(block);
 
-    // Allocate space for amended parameters
-    AllocaInst *sgXY =
-              CreateAllocaA(&builder, builder.getInt64Ty(), nullptr, "sgXY", 8);
-    AllocaInst *sgZ =
-               CreateAllocaA(&builder, builder.getInt32Ty(), nullptr, "sgZ", 8);
-    AllocaInst *sbXY =
-              CreateAllocaA(&builder, builder.getInt64Ty(), nullptr, "sbXY", 8);
-    AllocaInst *sbZ =
-               CreateAllocaA(&builder, builder.getInt32Ty(), nullptr, "sbZ", 8);
-    AllocaInst *ssm =
-            CreateAllocaA(&builder, origFT->getParamType(4), nullptr, "ssm", 8);
-    AllocaInst *scs =
-            CreateAllocaA(&builder, origFT->getParamType(5), nullptr, "scs", 8);
+    // Allocate space for function parameters.
+    AllocaInst *localFuncPtr =
+        CreateAlignedAlloca(M, &builder, builder.getInt8PtrTy(), 8, "l_ptr");
+    AllocaInst *localGridXY =
+        CreateAlignedAlloca(M, &builder, builder.getInt64Ty(), 8, "l_gXY");
+    AllocaInst *localGridZ =
+        CreateAlignedAlloca(M, &builder, builder.getInt32Ty(), 8, "l_gZ");
+    AllocaInst *localBlockXY =
+        CreateAlignedAlloca(M, &builder, builder.getInt64Ty(), 8, "l_bXY");
+    AllocaInst *localBlockZ =
+        CreateAlignedAlloca(M, &builder, builder.getInt32Ty(), 8, "l_bZ");
+    AllocaInst *localArgs =
+        CreateAlignedAlloca(M, &builder, origFT->getParamType(5), 8, "l_args");
+    AllocaInst *localSharedMemory =
+        CreateAlignedAlloca(M, &builder, origFT->getParamType(6), 8, "l_sm");
+    AllocaInst *localCudaStream =
+        CreateAlignedAlloca(M, &builder, origFT->getParamType(7), 8, "l_st");
 
-    builder.CreateAlignedStore(gridXY, sgXY, 8, false);
-    builder.CreateAlignedStore(gridZ, sgZ, 8, false);
-    builder.CreateAlignedStore(blockXY, sbXY, 8, false);
-    builder.CreateAlignedStore(blockZ, sbZ, 8, false);
-    builder.CreateAlignedStore(sharedMem, ssm, 8, false);
-    builder.CreateAlignedStore(cudaStream, scs, 8, false);
+    // Store the local variables.
+    builder.CreateAlignedStore(argFuncPtr, localFuncPtr, 8, false);
+    builder.CreateAlignedStore(argGridXY, localGridXY, 8, false);
+    builder.CreateAlignedStore(argGridZ, localGridZ, 8, false);
+    builder.CreateAlignedStore(argBlockXY, localBlockXY, 8, false);
+    builder.CreateAlignedStore(argBlockZ, localBlockZ, 8, false);
+    builder.CreateAlignedStore(argArgs, localArgs, 8, false);
+    builder.CreateAlignedStore(argSharedMem, localSharedMemory, 8, false);
+    builder.CreateAlignedStore(argCudaStream, localCudaStream, 8, false);
 
     // Scale grid X
-    Value *ptrGridX = builder.CreatePointerCast(sgXY, Type::getInt32PtrTy(ctx));
+    Value *ptrGridX = builder.CreatePointerCast(localGridXY,
+                                                Type::getInt32PtrTy(ctx));
     ptrGridX = builder.CreateInBoundsGEP(ptrGridX,
                                          ConstantInt::get(builder.getInt64Ty(),
                                                           0));
     Value *valGridX = builder.CreateAlignedLoad(ptrGridX, 4);
     Value *valScaledGridX = 
         builder.CreateUDiv(valGridX,
-                           builder.CreateIntCast(scaleGridX,
+                           builder.CreateIntCast(argScaleGridX,
                                                  builder.getInt32Ty(),
                                                  false));
     builder.CreateAlignedStore(valScaledGridX, ptrGridX, 4, false);
 
     // Scale grid Y
-    Value *ptrGridY = builder.CreatePointerCast(sgXY, Type::getInt32PtrTy(ctx));
+    Value *ptrGridY = builder.CreatePointerCast(localGridXY,
+                                                Type::getInt32PtrTy(ctx));
     ptrGridY = builder.CreateInBoundsGEP(ptrGridY,
                                          ConstantInt::get(builder.getInt64Ty(),
                                                           1));
     Value *valGridY = builder.CreateAlignedLoad(ptrGridY, 4);
     Value *valScaledGridY = 
         builder.CreateUDiv(valGridY,
-                           builder.CreateIntCast(scaleGridY,
+                           builder.CreateIntCast(argScaleGridY,
                                                  builder.getInt32Ty(),
                                                  false));
     builder.CreateAlignedStore(valScaledGridY, ptrGridY, 4, false);
 
     // Scale grid Z
-    Value *valGridZ = builder.CreateAlignedLoad(sgZ, 8);
+    Value *valGridZ = builder.CreateAlignedLoad(localGridZ, 8);
     Value *valScaledGridZ = 
         builder.CreateUDiv(valGridZ,
-                           builder.CreateIntCast(scaleGridZ,
+                           builder.CreateIntCast(argScaleGridZ,
                                                  builder.getInt32Ty(),
                                                  false));
-    builder.CreateAlignedStore(valScaledGridZ, sgZ, 8, false);
+    builder.CreateAlignedStore(valScaledGridZ, localGridZ, 8, false);
 
     // Scale BLOCK X
-    Value *ptrBlockX = builder.CreatePointerCast(sbXY, Type::getInt32PtrTy(ctx));
+    Value *ptrBlockX = builder.CreatePointerCast(localBlockXY,
+                                                 Type::getInt32PtrTy(ctx));
     ptrBlockX = builder.CreateInBoundsGEP(ptrBlockX,
                                           ConstantInt::get(builder.getInt64Ty(),
                                                            0));
     Value *valBlockX = builder.CreateAlignedLoad(ptrBlockX, 4);
     Value *valScaledBlockX = 
         builder.CreateUDiv(valBlockX,
-                           builder.CreateIntCast(scaleBlockX,
+                           builder.CreateIntCast(argScaleBlockX,
                                                  builder.getInt32Ty(),
                                                  false));
     builder.CreateAlignedStore(valScaledBlockX, ptrBlockX, 4, false);
 
     // Scale BLOCK Y
-    Value *ptrBlockY = builder.CreatePointerCast(sbXY, Type::getInt32PtrTy(ctx));
+    Value *ptrBlockY = builder.CreatePointerCast(localBlockXY,
+                                                 Type::getInt32PtrTy(ctx));
     ptrBlockY = builder.CreateInBoundsGEP(ptrBlockY,
                                           ConstantInt::get(builder.getInt64Ty(),
                                                            1));
     Value *valBlockY = builder.CreateAlignedLoad(ptrBlockY, 4);
     Value *valScaledBlockY = 
         builder.CreateUDiv(valBlockY,
-                           builder.CreateIntCast(scaleBlockY,
+                           builder.CreateIntCast(argScaleBlockY,
                                                  builder.getInt32Ty(),
                                                  false));
     builder.CreateAlignedStore(valScaledBlockY, ptrBlockY, 4, false);
 
     // Scale BLOCK Z
-    Value *valBlockZ = builder.CreateAlignedLoad(sbZ, 8);
+    Value *valBlockZ = builder.CreateAlignedLoad(localBlockZ, 8);
     Value *valScaledBlockZ = 
         builder.CreateUDiv(valBlockZ,
-                           builder.CreateIntCast(scaleBlockZ,
+                           builder.CreateIntCast(argScaleBlockZ,
                                                  builder.getInt32Ty(),
                                                  false));
-    builder.CreateAlignedStore(valScaledBlockZ, sbZ, 8, false);
+    builder.CreateAlignedStore(valScaledBlockZ, localBlockZ, 8, false);
 
-    Value *c_sgXY = builder.CreateAlignedLoad(sgXY, 8, "c_sgXY");
-    Value *c_sgZ = builder.CreateAlignedLoad(sgZ, 8, "c_sgZ");
-    Value *c_sbXY = builder.CreateAlignedLoad(sbXY, 8, "c_sbXY");
-    Value *c_sbZ = builder.CreateAlignedLoad(sbZ, 8, "c_sbZ");
-    Value *c_ssm = builder.CreateAlignedLoad(ssm, 8, "c_ssm");
-    Value *c_scs = builder.CreateAlignedLoad(scs, 8, "c_scs"); 
+    Value *c_localPtr = builder.CreateAlignedLoad(localFuncPtr, 8, "c_ptr");
+    Value *c_localGridXY = builder.CreateAlignedLoad(localGridXY, 8, "c_gXY");
+    Value *c_logalGridZ = builder.CreateAlignedLoad(localGridZ, 8, "c_gZ");
+    Value *c_localBlockXY = builder.CreateAlignedLoad(localBlockXY, 8, "c_bXY");
+    Value *c_localBlockZ = builder.CreateAlignedLoad(localBlockZ, 8, "c_bZ");
+    Value *c_localArgs = builder.CreateAlignedLoad(localArgs, 8, "c_args");
+    Value *c_localSharedMemory =
+                        builder.CreateAlignedLoad(localSharedMemory, 8, "c_sm");
+    Value *c_localCudaStream =
+                         builder.CreateAlignedLoad(localCudaStream, 8, "c_scs"); 
 
-    SmallVector<Value *, 6> callArgs;
-    callArgs.push_back(c_sgXY); callArgs.push_back(c_sgZ);
-    callArgs.push_back(c_sbXY); callArgs.push_back(c_sbZ);
-    callArgs.push_back(c_ssm); callArgs.push_back(c_scs);
+    SmallVector<Value *, 8> callArgs;
+    callArgs.push_back(c_localPtr);
+    callArgs.push_back(c_localGridXY); callArgs.push_back(c_logalGridZ);
+    callArgs.push_back(c_localBlockXY); callArgs.push_back(c_localBlockZ);
+    callArgs.push_back(c_localArgs);
+    callArgs.push_back(c_localSharedMemory);
+    callArgs.push_back(c_localCudaStream);
 
     CallInst *cudaCall = builder.CreateCall(original, callArgs);
-
     builder.CreateRet(cudaCall);
-
-    m_cudaConfigureCallScaled = ptrF;
+    m_rpcLaunchKernel = ptrF;
 }
 
-void CUDACoarseningPass::insertCudaLaunchDynamic(Module& M)
+void CUDACoarseningPass::insertRPCRegisterFunction(Module& M)
 {
-    LLVMContext& ctx = M.getContext();
+    /* LLVMContext& ctx = M.getContext();
 
     Function *original = M.getFunction(CUDA_RUNTIME_LAUNCH);
     assert(original != nullptr);
@@ -883,7 +841,7 @@ void CUDACoarseningPass::insertCudaLaunchDynamic(Module& M)
         m_rpcRegisterFunction = ptrF;
 
         return;
-    } 
+    } */
 }
 
 // PRIVATE ACCESSORS
@@ -964,6 +922,7 @@ CUDACoarseningPass::cudaRegistrationCallForKernel(Module&     M,
             }
         }
     }
+
     return nullptr;
 }
 

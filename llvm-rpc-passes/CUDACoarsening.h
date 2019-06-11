@@ -83,12 +83,10 @@ class CUDACoarseningPass : public ModulePass {
 
     void updatePlaceholderMap(Instruction *inst, InstVector& coarsenedInsts);
 
-    CallInst *amendConfiguration(Module&     M,
-                                 BasicBlock *configOKBlock,
-                                 std::string kernelName);
-
-    void insertCudaConfigureCallScaled(Module& M);
-    void insertCudaLaunchDynamic(Module& M);
+    void insertRPCFunctions(Module& M);
+    void deleteRPCFunctions(Module& M);
+    void insertRPCLaunchKernel(Module& M);
+    void insertRPCRegisterFunction(Module& M);
 
     // PRIVATE ACCESSORS
     bool shouldCoarsen(Function& F, bool hostCode = false) const;
@@ -114,8 +112,7 @@ class CUDACoarseningPass : public ModulePass {
     CoarseningMap           m_phMap;
     Map                     m_phReplacementMap;
 
-    Function               *m_cudaConfigureCallScaled;
-    Function               *m_cudaLaunchDynamic;
+    Function               *m_rpcLaunchKernel;
     Function               *m_rpcRegisterFunction;
 
     Function               *m_readEnvConfig;
