@@ -106,9 +106,9 @@ void CUDACoarseningPass::applyCoarseningMap(BasicBlock *block,
 void CUDACoarseningPass::applyCoarseningMap(Instruction  *inst,
                                             unsigned int  index)
 {
-    if (m_coarseningMap.find(inst) != m_coarseningMap.end()) {
-        return;
-    }
+   // if (m_coarseningMap.find(inst) != m_coarseningMap.end()) {
+   //     return;
+   // }
 
     for (unsigned int i = 0; i < inst->getNumOperands(); ++i) {
         if (!isa<Instruction>(inst->getOperand(i))) {

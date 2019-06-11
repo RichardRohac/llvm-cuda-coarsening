@@ -27,51 +27,6 @@ extern cl::opt<std::string> CLCoarseningDimension;
 
 using namespace llvm;
 
-char DivergenceAnchorPass::ID = 0;
-
-DivergenceAnchorPass::DivergenceAnchorPass()
-: FunctionPass(ID)
-{
-}
-
-void DivergenceAnchorPass::getAnalysisUsage(AnalysisUsage& AU) const
-{
-}
-
-bool DivergenceAnchorPass::runOnFunction(Function& F)
-{
-    for (BasicBlock &B : F) {
-        if (B.getName().find("rpc-anchor_entry") != std::string::npos) {
-            return false;
-        }
-    }
-
-    BasicBlock *entry = &F.getEntryBlock();
-    entry->splitBasicBlock(&entry->front(), "..rpc-anchor_entry");
-
-    std::vector<std::pair<BasicBlock*, Instruction *> > toSplit;
-    for (BasicBlock &B : F) {
-        for (Instruction &I : B) {
-            if (isa<ReturnInst>(&I)) {
-               toSplit.push_back(std::make_pair<BasicBlock  *,
-                                                Instruction *>(&B, &I));
-            }
-        }
-    }
-    for (std::pair<BasicBlock *, Instruction *> s : toSplit) {
-        s.first->splitBasicBlock(s.second, "..rpc-anchor_end");
-    //    SplitBlock(pB, &pB->front(), "..rpc-anchor_end");
-    }
-
-    return true;
-}
-
-static RegisterPass<DivergenceAnchorPass> Z("cuda-divergence-anchor-pass",
-                                            "CUDA Divergence Anchor Pass",
-                                            false, // Only looks at CFG
-                                            false // Analysis pass
-                                            );
-
 // DATA
 char DivergenceAnalysisPassTL::ID = 0;
 char DivergenceAnalysisPassBL::ID = 0;
@@ -91,6 +46,11 @@ RegionVector& DivergenceAnalysisPass::getOutermostRegions()
     return m_outermostRegions;
 }
 
+RegionVector& DivergenceAnalysisPass::getRegions()
+{
+    return m_regions;
+}
+
 InstVector& DivergenceAnalysisPass::getOutermostInstructions()
 {
     // Use memoization.
@@ -98,6 +58,11 @@ InstVector& DivergenceAnalysisPass::getOutermostInstructions()
         findOutermost(m_divergent, m_regions, m_outermostDivergent);
     }
     return m_outermostDivergent;
+}
+
+InstVector& DivergenceAnalysisPass::getInstructions()
+{
+    return m_divergent;
 }
 
 bool DivergenceAnalysisPass::isDivergent(Instruction *inst)
@@ -278,7 +243,7 @@ DivergenceAnalysisPassTL::DivergenceAnalysisPassTL()
 // PUBLIC MANIPULATORS
 void DivergenceAnalysisPassTL::getAnalysisUsage(AnalysisUsage& AU) const
 {
-    AU.addRequired<DivergenceAnchorPass>();
+    //AU.addRequired<DivergenceAnchorPass>();
     AU.addRequired<LoopInfoWrapperPass>();
     AU.addRequired<PostDominatorTreeWrapperPass>();
     AU.addRequired<DominatorTreeWrapperPass>();
@@ -317,7 +282,7 @@ DivergenceAnalysisPassBL::DivergenceAnalysisPassBL()
 // PUBLIC MANIPULATORS
 void DivergenceAnalysisPassBL::getAnalysisUsage(AnalysisUsage& AU) const
 {
-    AU.addRequired<DivergenceAnchorPass>();
+    //AU.addRequired<DivergenceAnchorPass>();
     AU.addRequired<LoopInfoWrapperPass>();
     AU.addRequired<PostDominatorTreeWrapperPass>();
     AU.addRequired<DominatorTreeWrapperPass>();

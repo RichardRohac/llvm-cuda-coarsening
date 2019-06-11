@@ -24,6 +24,7 @@ namespace llvm {
     class BasicBlock;
     class BranchInst;
     class WeakTrackingVH;
+    class PHINode;
 }
 
 class DivergentRegion;
@@ -50,6 +51,8 @@ typedef std::set<llvm::BranchInst *> BranchSet;
 typedef std::vector<DivergentRegion *> RegionVector;
 
 typedef std::map<llvm::Instruction *, InstVector> CoarseningMap;
+
+typedef std::vector<llvm::PHINode *> PhiVector;
 
 // ===========================================================================
 // HELPER FUNCTIONS

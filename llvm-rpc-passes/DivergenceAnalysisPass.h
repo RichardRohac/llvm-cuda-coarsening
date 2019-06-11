@@ -20,19 +20,6 @@ namespace llvm {
 class GridAnalysisPass;
 class DivergentRegion;
 
-class DivergenceAnchorPass : public FunctionPass {
-  public:
-    // CREATORS
-    DivergenceAnchorPass();
-
-    // MANIPULATORS
-    void getAnalysisUsage(AnalysisUsage& AU) const override;
-    bool runOnFunction(Function& F) override;
-    
-    // DATA
-    static char ID;
-};
-
 class DivergenceAnalysisPass {
 public:
     // CREATORS
@@ -40,7 +27,9 @@ public:
 
     // ACCESSORS
     RegionVector& getOutermostRegions();
+    RegionVector& getRegions();
     InstVector& getOutermostInstructions();
+    InstVector& getInstructions();
 
     bool isDivergent(Instruction *inst);
 
