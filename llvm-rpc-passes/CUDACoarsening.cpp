@@ -276,7 +276,7 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
                     if (m_dynamicMode) {
                         // In dynamic mode, replace the launch call with
                         // the dispatcher function.
-                        //callInst->setCalledFunction(m_cudaLaunchDynamic);
+                        callInst->setCalledFunction(m_rpcLaunchKernel);
                         continue;
                     }
 
@@ -476,7 +476,6 @@ std::string CUDACoarseningPass::namedKernelVersion(std::string kernel,
 
     std::string name = "_Z";
     name.append(std::to_string(demangled.length() + suffix.length()));
-   // std::string name = "rpc_";
     name.append(demangled);
     name.append(suffix);
 
@@ -533,7 +532,7 @@ void CUDACoarseningPass::scaleGrid(BasicBlock *configBlock,
         args.push_back(builder.getInt8(scaleBlock[2])); // scale block Z
     }
     else {
-        /*llvm::CallInst *regFunc = cudaRegistrationCallForKernel(
+        llvm::CallInst *regFunc = cudaRegistrationCallForKernel(
                              *configCall->getParent()->getParent()->getParent(),
                              kernelName);
         GEPOperator *origGEP = dyn_cast<GEPOperator>(regFunc->getOperand(2));
@@ -550,7 +549,7 @@ void CUDACoarseningPass::scaleGrid(BasicBlock *configBlock,
                                                                    "",
                                                                    configCall);
 
-        args.insert(args.begin(), gep);*/
+        args.insert(args.begin(), gep);
     }
 
     CallInst *newCall = builder.CreateCall(m_rpcLaunchKernel, args);
@@ -593,25 +592,26 @@ void CUDACoarseningPass::insertRPCLaunchKernel(Module& M)
 
     Function *ptrF;
 
-    // In case of dynamic mode, we use configuration function provided
+    // In the dynamic mode we use configuration function provided
     // externally.
     if (m_dynamicMode) {
-        /*FunctionCallee scaled = M.getOrInsertFunction(
-            "cudaConfigureCallScaled",
+        FunctionCallee scaled = M.getOrInsertFunction(
+            "rpcLaunchKernel",
             Type::getInt32Ty(ctx),   // return type
             Type::getInt8PtrTy(ctx), // deviceFun
             Type::getInt64Ty(ctx),   // gridXY
             Type::getInt32Ty(ctx),   // gridZ
             Type::getInt64Ty(ctx),   // blockXY
             Type::getInt32Ty(ctx),   // blockZ
-            origFT->getParamType(4), // size
-            origFT->getParamType(5)  // ptrStream
+            origFT->getParamType(5), // args
+            origFT->getParamType(6), // sharedMemory
+            origFT->getParamType(7)  // cudaStream
         );
 
         ptrF = cast<Function>(scaled.getCallee());
         ptrF->setCallingConv(original->getCallingConv());
 
-        m_cudaConfigureCallScaled = ptrF;*/
+        m_rpcLaunchKernel = ptrF;
 
         return;
     }
@@ -791,34 +791,14 @@ void CUDACoarseningPass::insertRPCLaunchKernel(Module& M)
 
 void CUDACoarseningPass::insertRPCRegisterFunction(Module& M)
 {
-    /* LLVMContext& ctx = M.getContext();
+    LLVMContext& ctx = M.getContext();
 
     Function *original = M.getFunction(CUDA_RUNTIME_LAUNCH);
-    assert(original != nullptr);
-
-    FunctionType *origFT = original->getFunctionType();
+    assert(original != nullptr);;
 
     Function *ptrF;
 
     if (m_dynamicMode) {
-        FunctionCallee dynLaunch = M.getOrInsertFunction(
-            "cudaLaunchDynamic",
-            origFT->getReturnType(),
-            origFT->getParamType(0), // ptrKernel
-            origFT->getParamType(1), // gridXY
-            origFT->getParamType(2), // gridZ
-            origFT->getParamType(3), // blockXY
-            origFT->getParamType(4), // blockZ
-            origFT->getParamType(5), // ptrptrArgs
-            origFT->getParamType(6), // size
-            origFT->getParamType(7)  // ptrStream
-        );
-
-        ptrF = cast<Function>(dynLaunch.getCallee());
-        ptrF->setCallingConv(original->getCallingConv());
-
-        m_cudaLaunchDynamic = ptrF;
-
         FunctionCallee registerFunction = M.getOrInsertFunction(
             "rpcRegisterFunction",
             Type::getInt32Ty(ctx),
@@ -841,7 +821,7 @@ void CUDACoarseningPass::insertRPCRegisterFunction(Module& M)
         m_rpcRegisterFunction = ptrF;
 
         return;
-    } */
+    }
 }
 
 // PRIVATE ACCESSORS
