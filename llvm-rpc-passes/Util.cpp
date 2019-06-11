@@ -36,8 +36,18 @@ std::string Util::demangle(std::string mangledName)
 std::string Util::nameFromDemangled(std::string demangledName)
 {
     std::size_t parenthesis = demangledName.find_first_of('(');
+    std::size_t anglebracket = demangledName.find_first_of('<');
+    if (anglebracket != std::string::npos) {
+        std::size_t returnType = demangledName.find_first_of(' ');
+        if (returnType < anglebracket) {
+            returnType++;
+            return demangledName.substr(returnType,
+                                        anglebracket - returnType);
+        }
+        return demangledName.substr(0, anglebracket);
+    }
     if (parenthesis != std::string::npos) {
-        return demangledName.substr(0, demangledName.find_first_of('('));
+        return demangledName.substr(0, parenthesis);
     }
 
     return demangledName;
@@ -198,7 +208,7 @@ void Util::cloneDominatorInfo(BasicBlock *BB, Map &map, DominatorTree *DT)
 }
 
 // Map management ---------------------------------------------------------
-/*void Util::applyMap(Instruction *Inst, CoarseningMap &map, unsigned int CF) {
+void Util::applyMap(Instruction *Inst, CoarseningMap &map, unsigned int CF) {
   for (unsigned op = 0, opE = Inst->getNumOperands(); op != opE; ++op) {
     Instruction *Op = dyn_cast<Instruction>(Inst->getOperand(op));
     CoarseningMap::iterator It = map.find(Op);
@@ -209,7 +219,7 @@ void Util::cloneDominatorInfo(BasicBlock *BB, Map &map, DominatorTree *DT)
       Inst->setOperand(op, NewValue);
     }
   }
-}*/
+}
 
 void Util::applyMap(Instruction *Inst, Map& map) {
     for (unsigned op = 0, opE = Inst->getNumOperands(); op != opE; ++op) {
@@ -316,6 +326,15 @@ void Util::changeBlockTarget(BasicBlock   *block,
     assert(terminator->getNumSuccessors() &&
             "The target can be change only if it is unique");
     terminator->setSuccessor(branchIndex, newTarget);
+}
+
+PhiVector Util::getPHIs(BasicBlock *block) {
+  PhiVector result;
+  PHINode *phi = nullptr;
+  for (auto iter = block->begin(); (phi = dyn_cast<PHINode>(iter)); ++iter) {
+    result.push_back(phi);
+  }
+  return result;
 }
 
 void Util::remapBlocksInPHIs(BasicBlock *block,

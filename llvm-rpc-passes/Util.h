@@ -98,7 +98,7 @@ class Util {
     static void applyMap(llvm::BasicBlock *block, Map& map);
     static void applyMapToPHIs(llvm::BasicBlock *block, Map& map);
     static void applyMapToPhiBlocks(llvm::PHINode *Phi, Map& map);
-    //void applyMap(llvm::Instruction *Inst, CoarseningMap &map, unsigned int CF);
+    void applyMap(llvm::Instruction *Inst, CoarseningMap &map, unsigned int CF);
     static void applyMap(InstVector& insts, Map& map, InstVector& result);
 
     static void replaceUses(llvm::Value *oldValue, llvm::Value *newValue);
@@ -115,7 +115,7 @@ class Util {
                                   llvm::BasicBlock   *newTarget,
                                   unsigned int        branchIndex = 0);
 
-
+    static PhiVector getPHIs(llvm::BasicBlock *block);
     static void remapBlocksInPHIs(llvm::BasicBlock *block,
                                   llvm::BasicBlock *oldBlock,
                                   llvm::BasicBlock *newBlock);
