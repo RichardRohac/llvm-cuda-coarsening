@@ -42,11 +42,25 @@ inline std::string demangle(std::string mangledName)
     return (status == 0) ? result.get() : mangledName;
 }
 
-#ifdef CUDA_USES_NEW_LAUNCH
-extern "C" unsigned int __cudaPushCallConfiguration(struct dim3  gridDim,
-                                                    struct dim3  blockDim,
-                                                    size_t       sharedMem,
-                                                    void        *stream);
+std::string nameFromDemangled(std::string demangledName)
+{
+    std::size_t parenthesis = demangledName.find_first_of('(');
+    std::size_t anglebracket = demangledName.find_first_of('<');
+    if (anglebracket != std::string::npos) {
+        std::size_t returnType = demangledName.find_first_of(' ');
+        if (returnType < anglebracket) {
+            returnType++;
+            return demangledName.substr(returnType,
+                                        anglebracket - returnType);
+        }
+        return demangledName.substr(0, anglebracket);
+    }
+    if (parenthesis != std::string::npos) {
+        return demangledName.substr(0, parenthesis);
+    }
+
+    return demangledName;
+}
 
 extern "C" unsigned int cudaLaunchKernel(const void  *ptr, 
                                          dim3         gridDim,
@@ -54,9 +68,6 @@ extern "C" unsigned int cudaLaunchKernel(const void  *ptr,
                                          void       **args,
                                          size_t       sharedMem,
                                          void        *stream); 
-#else
-// TODO
-#endif
 
 extern "C" void __cudaRegisterFunction(void       **fatCubinHandle,
                                        const char  *hostFun,
@@ -68,14 +79,6 @@ extern "C" void __cudaRegisterFunction(void       **fatCubinHandle,
                                        dim3        *bDim,
                                        dim3        *gDim,
                                        int         *wSize);
-
-inline unsigned int errorFallback(struct dim3  gridDim,
-                                  struct dim3  blockDim,
-                                  size_t       sharedMem,
-                                  void        *stream)
-{
-    return __cudaPushCallConfiguration(gridDim, blockDim, sharedMem, stream);
-}
 
 inline unsigned int errorFallback(const void  *ptr, 
                                   dim3         gridDim,
@@ -152,14 +155,14 @@ const void rpcRegisterFunction(void       **fatCubinHandle,
     kernelPtrMap[hostFun] = deviceName;
 
     std::string name = demangle(deviceFun);
-    name = name.substr(0, name.find_first_of('('));
+    name = nameFromDemangled(name);
 
     nameKernelMap[name] = hostFun;
 
     __cudaRegisterFunction(fatCubinHandle,
                            hostFun,
                            deviceFun,
-                           deviceFun,
+                           deviceFun, // This parameter was repurposed.
                            thread_limit,
                            tid,
                            bid,
@@ -168,29 +171,41 @@ const void rpcRegisterFunction(void       **fatCubinHandle,
                            wSize);
 }
 
-extern "C" unsigned int cudaConfigureCallScaled(const char  *deviceFun,
-                                                struct dim3  gridDim,
-                                                struct dim3  blockDim,
-                                                size_t       sharedMem,
-                                                void        *stream)
+extern "C" unsigned int rpcLaunchKernel(const void  *ptr, 
+                                        dim3         gridDim,
+                                        dim3         blockDim,
+                                        void       **args,
+                                        size_t       sharedMem,
+                                        void        *stream)
 {
     char *kernelConfig = getenv("RPC_CONFIG");
     if (!kernelConfig) {
-        return errorFallback(gridDim, blockDim, sharedMem, stream);
-    }
+        return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
+    } 
 
     coarseningConfig config; 
 
-    // Expected format <kernelname>,<block/thread>,<factor>,<stride>
+    // Expected format <kernelname>,<dim>,<block/thread>,<factor>,<stride>
     if (!parseConfig(kernelConfig, &config)) {
-        return errorFallback(gridDim, blockDim, sharedMem, stream);
+        return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
     }
 
-    std::string dm = demangle(deviceFun);
-    dm = dm.substr(0, dm.find_first_of('('));
+    if (!config.block && config.direction == 0 &&
+        config.stride > (blockDim.x / config.factor)) {
+        printf("Stride parameter too big for X dimension!\n");
+        return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
+    }
 
-    if (dm != config.name) {
-        return errorFallback(gridDim, blockDim, sharedMem, stream);
+    if (!config.block && config.direction == 1 &&
+        config.stride > (blockDim.y / config.factor)) {
+        printf("Stride parameter too big for Y dimension!\n");
+        return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
+    }
+
+    if (!config.block && config.direction == 2 &&
+        config.stride > (blockDim.z / config.factor)) {
+        printf("Stride parameter too big for Z dimension!\n");
+        return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
     }
 
     dim3 *scaledDim = config.block ? &gridDim : &blockDim;
@@ -202,30 +217,6 @@ extern "C" unsigned int cudaConfigureCallScaled(const char  *deviceFun,
     }
     else {
         scaledDim->z /= config.factor;
-    }
-
-#ifdef CUDA_USES_NEW_LAUNCH
-    return __cudaPushCallConfiguration(gridDim, blockDim, sharedMem, stream);
-#endif
-}
-
-extern "C" unsigned int cudaLaunchDynamic(const void  *ptr, 
-                                          dim3         gridDim,
-                                          dim3         blockDim,
-                                          void       **args,
-                                          size_t       sharedMem,
-                                          void        *stream)
-{
-    char *kernelConfig = getenv("RPC_CONFIG");
-    if (!kernelConfig) {
-        return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
-    } 
-
-    coarseningConfig config; 
-
-    // Expected format <kernelname>,<block/thread>,<factor>,<stride>
-    if (!parseConfig(kernelConfig, &config)) {
-        return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
     }
 
     std::string nameScaled;
