@@ -316,7 +316,7 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
 void CUDACoarseningPass::generateVersions(Function& F, bool deviceCode)
 {
     std::vector<unsigned int> factors = {2, 4, 8, 16, 32};
-    std::vector<unsigned int> strides = {1, 32};
+    std::vector<unsigned int> strides = {1, 2, 4, 8, 32};
     std::vector<unsigned int> dimensions = {0};
 
     CallInst *cudaRegFuncCall = cudaRegistrationCallForKernel(*F.getParent(),
