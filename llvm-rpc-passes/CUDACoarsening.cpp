@@ -130,7 +130,7 @@ void CUDACoarseningPass::getAnalysisUsage(AnalysisUsage& AU) const
     AU.addRequired<GridAnalysisPass>();
     AU.addRequired<DivergenceAnalysisPassTL>();
     AU.addRequired<DivergenceAnalysisPassBL>();
-    //AU.addRequired<BenefitAnalysisPass>();
+    AU.addRequired<BenefitAnalysisPass>();
 }
 
 bool CUDACoarseningPass::parseConfig()
@@ -315,9 +315,9 @@ bool CUDACoarseningPass::handleHostCode(Module& M)
 
 void CUDACoarseningPass::generateVersions(Function& F, bool deviceCode)
 {
-    std::vector<unsigned int> factors = {2, 4, 8};
-    std::vector<unsigned int> strides = {1, 2, 32};
-    std::vector<unsigned int> dimensions = {0, 1};
+    std::vector<unsigned int> factors = {2, 4, 8, 16, 32};
+    std::vector<unsigned int> strides = {1, 32};
+    std::vector<unsigned int> dimensions = {0};
 
     CallInst *cudaRegFuncCall = cudaRegistrationCallForKernel(*F.getParent(),
                                                               F.getName());
@@ -338,6 +338,31 @@ void CUDACoarseningPass::generateVersions(Function& F, bool deviceCode)
                                 false, // Thread-level.
                                 cudaRegFuncCall);
             }
+            // Make sure we do not over-duplicate shared memory!
+            if (deviceCode) {
+                m_divergentGlobals =
+                            m_divergenceAnalysisBL->getDivergentGlobals(&F);
+
+                uint32_t smemSize = 0;
+                for (auto& gv : m_divergentGlobals) {
+                    SequentialType *seqType = dyn_cast<SequentialType>(
+                                                            gv->getValueType());
+                    if (seqType) {
+                        Type *elT = seqType->getArrayElementType();
+                        uint16_t elTSize =
+                           F.getParent()->getDataLayout().getTypeAllocSize(elT);
+
+                        smemSize += elTSize * seqType->getArrayNumElements();
+                    }
+                }
+
+                if (smemSize * factor >= 0xc000) { // compute_61 limit (48kB)
+                    errs() << "Block mode factor " << factor << " not generated "
+                        << ", reached shared memory limit\n";
+                    continue;
+                }
+            }
+
             generateVersion(F,
                             deviceCode,
                             factor,
@@ -493,7 +518,9 @@ void CUDACoarseningPass::analyzeKernel(Function& F)
     m_phReplacementMap.clear();
 
     // Perform initial analysis.
-    //m_benefitAnalysis = &getAnalysis<BenefitAnalysisPass>(F);
+    m_benefitAnalysis = &getAnalysis<BenefitAnalysisPass>(F);
+    m_benefitAnalysis->printStatistics();
+
     m_loopInfo = &getAnalysis<LoopInfoWrapperPass>(F).getLoopInfo();
     m_postDomT = &getAnalysis<PostDominatorTreeWrapperPass>(F).getPostDomTree();
     m_domT = &getAnalysis<DominatorTreeWrapperPass>(F).getDomTree();
