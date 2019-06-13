@@ -62,14 +62,14 @@ void BenefitAnalysisPass::printStatistics() const
              errs() << " ";
          }
 
-         errs() << "               ";
-
-        // coarseningBenefit& cb = m_benefitMapTL[factor]->second;
+         errs() << "       ";
+       
+         uint64_t benefit =  (factor - 1) * (m_totalTL - m_costTL);
+         uint64_t cost = duplicationCost(m_costTL, false, factor);
 
          std::stringstream tmp;
-         uint64_t dupCost = duplicationCost(m_totalTL - m_costTL, false, factor);
-         tmp << dupCost << " / " << m_totalTL << " = " << std::setprecision(4) << 
-                         (double)dupCost / (double)m_totalTL;
+         tmp << benefit << " / " << cost << " = " << std::setprecision(4) << 
+                         (double)benefit / (double)cost;
          errs() << tmp.str();
          errs() << "\n";
     }
@@ -81,12 +81,14 @@ void BenefitAnalysisPass::printStatistics() const
              errs() << " ";
          }
 
-         errs() << "               ";
+         errs() << "       ";
+
+         uint64_t benefit = (m_totalBL - m_costBL) * (factor - 1);
+         uint64_t cost = duplicationCost(m_costBL, true, factor);
 
          std::stringstream tmp;
-         uint64_t dupCost = duplicationCost(m_totalBL - m_costBL, true, factor);
-         tmp << dupCost << " / " << m_totalBL << " = " << std::setprecision(4) << 
-                         (double)dupCost / (double)m_totalBL;
+         tmp << benefit << " / " << cost << " = " << std::setprecision(4) << 
+                         (double)benefit / (double)cost;
          errs() << tmp.str();
          errs() << "\n";
     }
@@ -135,7 +137,7 @@ bool BenefitAnalysisPass::runOnFunction(llvm::Function& F)
 
     for(InstVector::iterator it = insts.begin(); it != insts.end(); ++it) {
 
-        m_costTL += getCostForInstruction(*it);
+        m_costTL += 0.5 * getCostForInstruction(*it);
     }
 
     std::for_each(regions.begin(),
@@ -155,6 +157,10 @@ bool BenefitAnalysisPass::runOnFunction(llvm::Function& F)
         }
     }
 
+    if (m_costTL > m_totalTL) {
+        m_costTL = m_totalTL;
+    }
+
     m_totalBL = 0;
     m_costBL = 0;
 
@@ -162,7 +168,7 @@ bool BenefitAnalysisPass::runOnFunction(llvm::Function& F)
     regions = m_divergenceAnalysisBL->getOutermostRegions();
 
     for(InstVector::iterator it = insts.begin(); it != insts.end(); ++it) {
-        m_costBL += getCostForInstruction(*it);
+        m_costBL += 0.5 * getCostForInstruction(*it);
     }
 
     std::for_each(regions.begin(),
@@ -180,6 +186,10 @@ bool BenefitAnalysisPass::runOnFunction(llvm::Function& F)
             Instruction *pI = &I;
             m_totalBL += getCostForInstruction(pI);
         }
+    }
+
+    if (m_costBL > m_totalBL) {
+        m_costBL = m_totalBL;
     }
 
     return false;
@@ -246,6 +256,7 @@ uint64_t BenefitAnalysisPass::getCostForInstruction(Instruction *pI)
         for (uint64_t i = 0; i < m_loopInfo->getLoopDepth(parent); ++i) {
             uint64_t loopCost = this->loopCost(loop);
             if (!loopCost) {
+           //     errs() << "Only have loop depth: " << depth << " " << instCost << "\n";
                 return depth * instCost;
             }
 
