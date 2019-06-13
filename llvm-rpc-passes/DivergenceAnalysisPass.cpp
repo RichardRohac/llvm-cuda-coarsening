@@ -201,13 +201,7 @@ void DivergenceAnalysisPass::findUsers(InstVector&  seeds,
                 Value *ptrOp = isa<StoreInst>(inst) ? inst->getOperand(1)
                                                     : inst->getOperand(0);
 
-                errs() << "Found store / load:";
-                inst->dump();
-                errs() << "looking at operand: ";
-                ptrOp->dump();
-
                 if (isa<AddrSpaceCastInst>(ptrOp)) {
-                    errs() << "is addrspacecastinst!\n";
                     // Sometimes there is space cast instruction before store
                     AddrSpaceCastInst *spaceCastInst = 
                               dyn_cast<AddrSpaceCastInst>(ptrOp);
@@ -217,16 +211,12 @@ void DivergenceAnalysisPass::findUsers(InstVector&  seeds,
 
                     BitCastInst *bitCastInst = dyn_cast<BitCastInst>(ptrOp);
                     if (bitCastInst) {
-                            errs() << "is bitcastinst!\n";
                         ptrOp = bitCastInst->getOperand(0);
                     }
                 }
                 GetElementPtrInst *gep = dyn_cast<GetElementPtrInst>(ptrOp);
                 if (gep) {
-                    errs() << "got gepski";
-                    gep->dump();
-                    if (gep->getAddressSpace() == 3) { // shared memory gep) {
-                        errs() << "GOT HERE!" << "\n";
+                    if (gep->getAddressSpace() == 3) { // shared memory gep
                         findSharedMemoryUsers(
                             dyn_cast<GlobalVariable>(gep->getPointerOperand()),
                             &users,
@@ -254,6 +244,11 @@ void DivergenceAnalysisPass::findSharedMemoryUsers(GlobalVariable *smVar,
                                                    Instruction    *inst)
 {
     if (!smVar || !out) {
+        return;
+    }
+
+    if (smVar->isDeclaration()) {
+        // Dynamic SM mode.
         return;
     }
 
