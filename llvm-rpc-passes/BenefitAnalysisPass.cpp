@@ -19,6 +19,22 @@
 #include "DivergentRegion.h"
 
 extern cl::opt<std::string> CLCoarseningDimension;
+extern cl::opt<std::string> CLKernelName;
+extern cl::opt<std::string> CLCoarseningMode;
+
+std::unordered_map<unsigned int, unsigned int> g_opcodeCostMap = {
+    {Instruction::UDiv,  COST_DIV_NPOW2},
+    {Instruction::SDiv,  COST_DIV_NPOW2},
+    {Instruction::FDiv,  COST_DIV_NPOW2},
+    {Instruction::URem,  COST_MOD_NPOW2},
+    {Instruction::SRem,  COST_MOD_NPOW2},
+    {Instruction::FRem,  COST_MOD_NPOW2},
+    {Instruction::Br,    COST_BRANCH_DIV},
+    {Instruction::Store, COST_STORE_GLOBAL},
+    {Instruction::Load,  COST_LOAD_GLOBAL}
+};
+
+std::unordered_map<unsigned int, unsigned int>::iterator opcCostMapIt_t;
 
 // DATA
 char BenefitAnalysisPass::ID = 0;
@@ -30,62 +46,9 @@ BenefitAnalysisPass::BenefitAnalysisPass()
     clear();
 }
 
-// PUBLIC MANIPULATORS
-void BenefitAnalysisPass::getAnalysisUsage(llvm::AnalysisUsage& AU) const
+// PUBLIC ACCESSORS
+void BenefitAnalysisPass::printStatistics() const
 {
-    AU.addRequired<LoopInfoWrapperPass>();
-    AU.addRequired<ScalarEvolutionWrapperPass>();
-    AU.addRequired<DivergenceAnalysisPassTL>();
-    AU.addRequired<DivergenceAnalysisPassBL>();
-    AU.addRequired<GridAnalysisPass>();
-    AU.setPreservesAll();
-}
-
-bool BenefitAnalysisPass::runOnFunction(llvm::Function& F)
-{
-    if (!Util::isKernelFunction(F) || F.isDeclaration()) {
-        return false;
-    }
-
-    clear();
-
-    m_loopInfo = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-    m_scalarEvolution = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
-    m_divergenceAnalysisTL = &getAnalysis<DivergenceAnalysisPassTL>();
-    m_divergenceAnalysisBL = &getAnalysis<DivergenceAnalysisPassBL>();
-    m_gridAnalysis = &getAnalysis<GridAnalysisPass>();
-
-    uint64_t divergentCost = 0;
-    uint64_t totalCost = 0;
-
-    InstVector& insts = m_divergenceAnalysisTL->getOutermostInstructions();
-    RegionVector& regions = m_divergenceAnalysisTL->getOutermostRegions();
-
-    for(InstVector::iterator it = insts.begin(); it != insts.end(); ++it) {
-        divergentCost += getCostForInstruction(*it);
-    }
-
-    std::for_each(regions.begin(),
-                  regions.end(),
-                  [&, this](DivergentRegion *region) {
-                      for (BasicBlock *pB : region->getBlocks()) {
-                          for (Instruction &I: *pB) {
-                              divergentCost += getCostForInstruction(&I);
-                          }
-                      }
-                  });
-
-    for (BasicBlock &B : F) {
-        for (Instruction &I: B) {
-            Instruction *pI = &I;
-            uint64_t instCost = getCostForInstruction(pI);
-            if (m_divergenceAnalysisTL->isDivergent(pI))
-                totalCost += 2 * instCost;
-            else
-                totalCost += instCost;
-        }
-    }
-
     errs() << "\n\n";
     errs() << "CUDA Coarsening Benefit Analysis Pass results: \n";
     errs() << "===================================================== \n";
@@ -101,43 +64,14 @@ bool BenefitAnalysisPass::runOnFunction(llvm::Function& F)
 
          errs() << "               ";
 
+        // coarseningBenefit& cb = m_benefitMapTL[factor]->second;
+
          std::stringstream tmp;
-         uint64_t dupCost = duplicationCost(divergentCost, false, factor);
-         tmp << dupCost << " / " << totalCost << " = " << std::setprecision(4) << 
-                         (double)dupCost / (double)totalCost;
+         uint64_t dupCost = duplicationCost(m_totalTL - m_costTL, false, factor);
+         tmp << dupCost << " / " << m_totalTL << " = " << std::setprecision(4) << 
+                         (double)dupCost / (double)m_totalTL;
          errs() << tmp.str();
          errs() << "\n";
-    }
-
-    divergentCost = 0;
-    totalCost = 0;
-
-    insts = m_divergenceAnalysisBL->getOutermostInstructions();
-    regions = m_divergenceAnalysisBL->getOutermostRegions();
-
-    for(InstVector::iterator it = insts.begin(); it != insts.end(); ++it) {
-        divergentCost += getCostForInstruction(*it);
-    }
-
-    std::for_each(regions.begin(),
-                  regions.end(),
-                  [&, this](DivergentRegion *region) {
-                      for (BasicBlock *pB : region->getBlocks()) {
-                          for (Instruction &I: *pB) {
-                              divergentCost += getCostForInstruction(&I);
-                          }
-                      }
-                  });
-
-    for (BasicBlock &B : F) {
-        for (Instruction &I: B) {
-            Instruction *pI = &I;
-            uint64_t instCost = getCostForInstruction(pI);
-            if (m_divergenceAnalysisBL->isDivergent(pI))
-                totalCost += 2 * instCost;
-            else
-                totalCost += instCost;
-        }
     }
 
     for (unsigned int factor : factors) {
@@ -150,21 +84,152 @@ bool BenefitAnalysisPass::runOnFunction(llvm::Function& F)
          errs() << "               ";
 
          std::stringstream tmp;
-         uint64_t dupCost = duplicationCost(divergentCost, true, factor);
-         tmp << dupCost << " / " << totalCost << " = " << std::setprecision(4) << 
-                         (double)dupCost / (double)totalCost;
+         uint64_t dupCost = duplicationCost(m_totalBL - m_costBL, true, factor);
+         tmp << dupCost << " / " << m_totalBL << " = " << std::setprecision(4) << 
+                         (double)dupCost / (double)m_totalBL;
          errs() << tmp.str();
          errs() << "\n";
     }
     errs() << "===================================================== \n";
+}
+
+// PUBLIC MANIPULATORS
+void BenefitAnalysisPass::getAnalysisUsage(llvm::AnalysisUsage& AU) const
+{
+    AU.addRequired<LoopInfoWrapperPass>();
+    AU.addRequired<ScalarEvolutionWrapperPass>();
+    AU.addRequired<DivergenceAnalysisPassTL>();
+    AU.addRequired<DivergenceAnalysisPassBL>();
+    AU.addRequired<GridAnalysisPass>();
+    AU.setPreservesAll();
+}
+
+bool BenefitAnalysisPass::runOnFunction(llvm::Function& F)
+{
+    if (F.getParent()->getTargetTriple() != CUDA_TARGET_TRIPLE) {
+        // Run analysis only on device code.
+        return false;
+    }
+
+    // Apply the pass to kernels only.
+    if (!Util::shouldCoarsen(F,
+                             CLKernelName,
+                             false,
+                             CLCoarseningMode == "dynamic")) {
+        return false;
+    }
+
+    clear();
+
+    m_loopInfo = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+    m_scalarEvolution = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
+    m_divergenceAnalysisTL = &getAnalysis<DivergenceAnalysisPassTL>();
+    m_divergenceAnalysisBL = &getAnalysis<DivergenceAnalysisPassBL>();
+    m_gridAnalysis = &getAnalysis<GridAnalysisPass>();
+
+    m_totalTL = 0;
+    m_costTL = 0;
+
+    InstVector& insts = m_divergenceAnalysisTL->getOutermostInstructions();
+    RegionVector& regions = m_divergenceAnalysisTL->getOutermostRegions();
+
+    for(InstVector::iterator it = insts.begin(); it != insts.end(); ++it) {
+
+        m_costTL += getCostForInstruction(*it);
+    }
+
+    std::for_each(regions.begin(),
+                  regions.end(),
+                  [&, this](DivergentRegion *region) {
+                      for (BasicBlock *pB : region->getBlocks()) {
+                          for (Instruction &I: *pB) {
+                              m_costTL += getCostForInstruction(&I);
+                          }
+                      }
+                  });
+
+    for (BasicBlock &B : F) {
+        for (Instruction &I: B) {
+            Instruction *pI = &I;
+            m_totalTL += getCostForInstruction(pI);
+        }
+    }
+
+    m_totalBL = 0;
+    m_costBL = 0;
+
+    insts = m_divergenceAnalysisBL->getOutermostInstructions();
+    regions = m_divergenceAnalysisBL->getOutermostRegions();
+
+    for(InstVector::iterator it = insts.begin(); it != insts.end(); ++it) {
+        m_costBL += getCostForInstruction(*it);
+    }
+
+    std::for_each(regions.begin(),
+                  regions.end(),
+                  [&, this](DivergentRegion *region) {
+                      for (BasicBlock *pB : region->getBlocks()) {
+                          for (Instruction &I: *pB) {
+                              m_costBL += getCostForInstruction(&I);
+                          }
+                      }
+                  });
+
+    for (BasicBlock &B : F) {
+        for (Instruction &I: B) {
+            Instruction *pI = &I;
+            m_totalBL += getCostForInstruction(pI);
+        }
+    }
 
     return false;
 }
 
 // PRIVATE ACCESSORS
+bool isPow2(int i) {
+    if ( i <= 0 ) {
+        return 0;
+    }
+
+    return !(i & (i - 1));
+}
+
 uint64_t BenefitAnalysisPass::getCostForInstruction(Instruction *pI)
 {
-    uint64_t retVal = 1;
+    uint64_t instCost = COST_DEFAULT;
+
+    auto costMapIt = g_opcodeCostMap.find(pI->getOpcode());
+    if (costMapIt != g_opcodeCostMap.end()) {
+        instCost = costMapIt->second;
+    }
+
+    // Handle special cases
+    if (pI->getOpcode() == Instruction::UDiv ||
+        pI->getOpcode() == Instruction::SDiv ||
+        pI->getOpcode() == Instruction::FDiv) {
+            ConstantInt *c = dyn_cast<ConstantInt>(pI->getOperand(1));
+            if (c) {
+                if (isPow2(c->getLimitedValue())) {
+                    instCost = COST_DIV_POW2;
+                }
+            }
+    }
+
+    if (pI->getOpcode() == Instruction::URem ||
+        pI->getOpcode() == Instruction::SRem ||
+        pI->getOpcode() == Instruction::FRem) {
+            ConstantInt *c = dyn_cast<ConstantInt>(pI->getOperand(1));
+            if (c) {
+                if (isPow2(c->getLimitedValue())) {
+                    instCost = COST_MOD_POW2;
+                }
+            }
+    }
+
+    //if (isa<StoreInst>(pI)) {
+    //    StoreInst *store = dyn_cast<StoreInst>(pI);
+    //    if (store->getSt)
+    //}
 
     BasicBlock *parent = pI->getParent();
     Loop *loop = m_loopInfo->getLoopFor(parent);
@@ -177,25 +242,24 @@ uint64_t BenefitAnalysisPass::getCostForInstruction(Instruction *pI)
         // The latter can only be computed for some of the loops (where the
         // trip count is known at the compile time).
 
-        uint64_t totalCost = 1;
         uint64_t depth = m_loopInfo->getLoopDepth(parent);
         for (uint64_t i = 0; i < m_loopInfo->getLoopDepth(parent); ++i) {
             uint64_t loopCost = this->loopCost(loop);
             if (!loopCost) {
-                return depth;
+                return depth * instCost;
             }
 
-            totalCost *= loopCost;
+            instCost *= loopCost;
             loop = loop->getParentLoop();
         }
 
         //errs() << "Got trip count: " << totalCost << " ";
         //        pI->dump();
 
-        retVal = totalCost;
+        //retVal = totalCost;
     }
 
-    return retVal;
+    return instCost;
 }
 
 uint64_t BenefitAnalysisPass::loopCost(Loop *loop)
@@ -225,7 +289,7 @@ uint64_t BenefitAnalysisPass::loopCost(Loop *loop)
 
 uint64_t BenefitAnalysisPass::duplicationCost(uint64_t     divergentCost,
                                               bool         blockLevel,
-                                              unsigned int factor)
+                                              unsigned int factor) const
 {
     uint64_t result = 0;
     unsigned int dimension = Util::numeralDimension(CLCoarseningDimension);
@@ -235,7 +299,7 @@ uint64_t BenefitAnalysisPass::duplicationCost(uint64_t     divergentCost,
                 ? m_gridAnalysis->getGridSizeDependentInstructions(dimension)
                 : m_gridAnalysis->getBlockSizeDependentInstructions(dimension);
 
-    result += sizeInsts.size() * COST_MUL_INST;
+    result += sizeInsts.size() * COST_DEFAULT;
 
     InstVector tids = 
                 blockLevel
@@ -244,14 +308,14 @@ uint64_t BenefitAnalysisPass::duplicationCost(uint64_t     divergentCost,
     
     // origTid = [newTid / st] * (cf * st) + newTid % st + subid * st
 
-    result += tids.size() * COST_DIV_INST; // newTid / st [div]
-    result += tids.size() * COST_MUL_INST; // * (cf * st) [mul]
-    result += tids.size() * COST_MOD_INST; // newTid % st [mod]
-    result += tids.size() * COST_ADD_INST; // [mul] + [mod]
+    result += tids.size() * COST_DIV_POW2; // newTid / st [div]
+    result += tids.size() * COST_DEFAULT; // * (cf * st) [mul]
+    result += tids.size() * COST_MOD_POW2; // newTid % st [mod]
+    result += tids.size() * COST_DEFAULT; // [mul] + [mod]
 
     // subIds
     for (unsigned int index = 2; index <= factor; ++index) {
-        result += tids.size() * COST_ADD_INST;
+        result += tids.size() * COST_DEFAULT;
     }
 
     // duplication
