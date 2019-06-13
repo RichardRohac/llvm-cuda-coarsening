@@ -156,6 +156,7 @@ const void rpcRegisterFunction(void       **fatCubinHandle,
 
     std::string name = demangle(deviceFun);
     name = nameFromDemangled(name);
+    printf("Registering %s\n", name.c_str());
 
     nameKernelMap[name] = hostFun;
 
@@ -190,35 +191,6 @@ extern "C" unsigned int rpcLaunchKernel(const void  *ptr,
         return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
     }
 
-    if (!config.block && config.direction == 0 &&
-        config.stride > (blockDim.x / config.factor)) {
-        printf("Stride parameter too big for X dimension!\n");
-        return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
-    }
-
-    if (!config.block && config.direction == 1 &&
-        config.stride > (blockDim.y / config.factor)) {
-        printf("Stride parameter too big for Y dimension!\n");
-        return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
-    }
-
-    if (!config.block && config.direction == 2 &&
-        config.stride > (blockDim.z / config.factor)) {
-        printf("Stride parameter too big for Z dimension!\n");
-        return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
-    }
-
-    dim3 *scaledDim = config.block ? &gridDim : &blockDim;
-    if (config.direction == 0) {
-        scaledDim->x /= config.factor;
-    }
-    else if (config.direction == 1) {
-        scaledDim->y /= config.factor;
-    }
-    else {
-        scaledDim->z /= config.factor;
-    }
-
     std::string nameScaled;
     nameScaled.append(config.name);
     nameScaled.append("_");
@@ -233,17 +205,58 @@ extern "C" unsigned int rpcLaunchKernel(const void  *ptr,
     const nameKernelMap_t& map = getNameKernelMap();
     nameKernelMap_t::const_iterator it = map.find(nameScaled);
     if (it == map.end()) {
+        printf ("RPC_ERROR: kernel not found #1 %s\n", nameScaled.c_str());
         return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
     }
 
     const kernelPtrMap_t& kernelPtrMap = getKernelPtrMap();
     kernelPtrMap_t::const_iterator ptrIt = kernelPtrMap.find(it->second);
     if (ptrIt == kernelPtrMap.end()) {
+        printf ("RPC_ERROR: kernel not found #2 %s\n", nameScaled.c_str());
         return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
     }
 
     if (ptr != ptrIt->second) {
+        printf ("RPC_ERROR:  kernel not found #3 %s\n", nameScaled.c_str());
         return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
+    }
+
+    if (!config.block && config.direction == 0 &&
+        config.stride > (blockDim.x / config.factor)) {
+        printf("RPC_ERROR: Stride parameter too big for X dimension!\n");
+        return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
+    }
+
+    if (!config.block && config.direction == 1 &&
+        config.stride > (blockDim.y / config.factor)) {
+        printf("RPC_ERROR: Stride parameter too big for Y dimension!\n");
+        return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
+    }
+
+    if (!config.block && config.direction == 2 &&
+        config.stride > (blockDim.z / config.factor)) {
+        printf("RPC_ERROR:  Stride parameter too big for Z dimension!\n");
+        return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
+    }
+
+    dim3 *scaledDim = config.block ? &gridDim : &blockDim;
+    if (config.direction == 0) {
+        if (scaledDim->x / config.factor == 0) {
+            return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
+        }
+        scaledDim->x /= config.factor;
+    }
+    else if (config.direction == 1) {
+        if (scaledDim->y / config.factor == 0) {
+            return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
+        }
+        scaledDim->y /= config.factor;
+    }
+    else {
+        if (scaledDim->z / config.factor == 0) {
+            return errorFallback(ptr, gridDim, blockDim, args, sharedMem, stream);
+        }
+        scaledDim->z /= config.factor;
     }
 
     return cudaLaunchKernel(it->second,
