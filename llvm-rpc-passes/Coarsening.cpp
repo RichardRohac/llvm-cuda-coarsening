@@ -107,7 +107,7 @@ void CUDACoarseningPass::replicateGlobal(GlobalVariable *gv)
                                gv->isConstant(),
                                gv->getLinkage(),
                                gv->getInitializer(),
-                               gv->getName() + "..cf" + Twine(index + 2), //TODO
+                               gv->getName() + "_cf" + Twine(index + 2),
                                (GlobalVariable *) nullptr,
                                gv->getThreadLocalMode(),
                                gv->getType()->getAddressSpace());
